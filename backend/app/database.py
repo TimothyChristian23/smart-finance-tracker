@@ -154,6 +154,145 @@ def monthly_summary(month: str | None = None) -> dict:
     }
 
 
+def available_months() -> list[dict]:
+    """Return imported months with high-level totals."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                substr(transaction_date, 1, 7) AS month,
+                COALESCE(SUM(CASE WHEN amount_cents < 0 THEN ABS(amount_cents) ELSE 0 END), 0) AS spending_cents,
+                COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0) AS income_cents,
+                COALESCE(SUM(amount_cents), 0) AS net_cents,
+                COUNT(*) AS transaction_count
+            FROM transactions
+            GROUP BY month
+            ORDER BY month DESC
+            """
+        ).fetchall()
+
+    return [
+        {
+            "month": row["month"],
+            "total_spending": cents_to_dollars(row["spending_cents"]),
+            "total_income": cents_to_dollars(row["income_cents"]),
+            "net": cents_to_dollars(row["net_cents"]),
+            "transaction_count": row["transaction_count"],
+        }
+        for row in rows
+    ]
+
+
+def category_totals(month: str | None = None) -> list[dict]:
+    """Return category totals and transaction counts for expenses."""
+    where_sql, params = _month_filter(month)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                category,
+                COALESCE(SUM(ABS(amount_cents)), 0) AS total_cents,
+                COUNT(*) AS transaction_count
+            FROM transactions
+            {where_sql}
+              {"AND" if where_sql else "WHERE"} amount_cents < 0
+            GROUP BY category
+            ORDER BY total_cents DESC
+            """,
+            params,
+        ).fetchall()
+
+    return [
+        {
+            "category": row["category"],
+            "total": cents_to_dollars(row["total_cents"]),
+            "transaction_count": row["transaction_count"],
+        }
+        for row in rows
+    ]
+
+
+def monthly_trends(limit: int = 12) -> list[dict]:
+    """Return month-by-month totals in chronological order."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                substr(transaction_date, 1, 7) AS month,
+                COALESCE(SUM(CASE WHEN amount_cents < 0 THEN ABS(amount_cents) ELSE 0 END), 0) AS spending_cents,
+                COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0) AS income_cents,
+                COALESCE(SUM(amount_cents), 0) AS net_cents,
+                COUNT(*) AS transaction_count
+            FROM transactions
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [
+        {
+            "month": row["month"],
+            "total_spending": cents_to_dollars(row["spending_cents"]),
+            "total_income": cents_to_dollars(row["income_cents"]),
+            "net": cents_to_dollars(row["net_cents"]),
+            "transaction_count": row["transaction_count"],
+        }
+        for row in reversed(rows)
+    ]
+
+
+def top_merchants(month: str | None = None, limit: int = 10) -> list[dict]:
+    """Return top expense merchants by total spending."""
+    where_sql, params = _month_filter(month)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                description,
+                category,
+                COALESCE(SUM(ABS(amount_cents)), 0) AS total_cents,
+                COUNT(*) AS transaction_count
+            FROM transactions
+            {where_sql}
+              {"AND" if where_sql else "WHERE"} amount_cents < 0
+            GROUP BY description, category
+            ORDER BY total_cents DESC
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+
+    return [
+        {
+            "merchant": row["description"],
+            "category": row["category"],
+            "total": cents_to_dollars(row["total_cents"]),
+            "transaction_count": row["transaction_count"],
+        }
+        for row in rows
+    ]
+
+
+def largest_expenses(month: str | None = None, limit: int = 10) -> list[dict]:
+    """Return largest individual expenses."""
+    where_sql, params = _month_filter(month)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, transaction_date, description, amount_cents, category, source_file
+            FROM transactions
+            {where_sql}
+              {"AND" if where_sql else "WHERE"} amount_cents < 0
+            ORDER BY ABS(amount_cents) DESC
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+    return [_transaction_row_to_dict(row) for row in rows]
+
+
 def spending_for_categories(categories: list[str], month: str | None = None) -> int:
     """Return spending cents for the requested categories."""
     if not categories:
@@ -174,11 +313,13 @@ def spending_for_categories(categories: list[str], month: str | None = None) -> 
     return int(row["spending_cents"])
 
 
-def detect_anomalies(limit: int = 10) -> list[dict]:
+def detect_anomalies(limit: int = 10, month: str | None = None) -> list[dict]:
     """Return unusually large expenses compared with each category average."""
+    where_sql, params = _month_filter(month)
+    anomaly_filter = f"{where_sql} AND" if where_sql else "WHERE"
     with connect() as conn:
         rows = conn.execute(
-            """
+            f"""
             WITH category_stats AS (
                 SELECT
                     category,
@@ -199,13 +340,13 @@ def detect_anomalies(limit: int = 10) -> list[dict]:
                 s.transaction_count
             FROM transactions t
             JOIN category_stats s ON t.category = s.category
-            WHERE t.amount_cents < 0
+            {anomaly_filter} t.amount_cents < 0
               AND s.transaction_count >= 2
               AND ABS(t.amount_cents) >= s.avg_cents * 1.8
             ORDER BY ABS(t.amount_cents) DESC
             LIMIT ?
             """,
-            (limit,),
+            [*params, limit],
         ).fetchall()
 
     anomalies = []

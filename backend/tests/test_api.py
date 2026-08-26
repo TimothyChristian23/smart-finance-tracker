@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import reset_db
-from app.main import app, money_to_cents, parse_transactions_csv
+from app.main import app, infer_month, money_to_cents, parse_transactions_csv
 
 client = TestClient(app)
 
@@ -76,6 +76,55 @@ def test_anomalies_include_large_category_outlier():
     assert "One-Time Electronics Store" in descriptions
 
 
+def test_analytics_endpoints_return_months_categories_trends_and_merchants():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    months = client.get("/months").json()
+    categories = client.get("/categories?month=2026-07").json()
+    trends = client.get("/trends").json()
+    merchants = client.get("/merchants?month=2026-07&limit=2").json()
+    largest = client.get("/expenses/largest?month=2026-07&limit=1").json()
+
+    assert months[0]["month"] == "2026-07"
+    assert months[0]["total_spending"] == 2840.87
+    assert categories[:2] == [
+        {"category": "Housing", "total": 1450.0, "transaction_count": 1},
+        {"category": "Shopping", "total": 964.2, "transaction_count": 2},
+    ]
+    assert trends == [months[0]]
+    assert merchants[0] == {
+        "merchant": "Apartment Rent",
+        "category": "Housing",
+        "total": 1450.0,
+        "transaction_count": 1,
+    }
+    assert largest[0]["description"] == "Apartment Rent"
+
+
+def test_ask_handles_spending_income_and_ranking_questions():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    total_spending = client.post("/ask", json={"question": "What was my total spending in July 2026?"}).json()
+    income = client.post("/ask", json={"question": "What was my income in 2026-07?"}).json()
+    top_category = client.post("/ask", json={"question": "What was my biggest category in 2026-07?"}).json()
+    top_merchant = client.post("/ask", json={"question": "Who was my top merchant in 2026-07?"}).json()
+    largest = client.post("/ask", json={"question": "What was my largest expense in 2026-07?"}).json()
+    anomalies = client.post("/ask", json={"question": "Any unusual charges in 2026-07?"}).json()
+
+    assert total_spending["intent"] == "total_spending"
+    assert total_spending["amount"] == 2840.87
+    assert income["intent"] == "income"
+    assert income["amount"] == 3200.0
+    assert top_category["intent"] == "top_category"
+    assert top_category["categories"] == ["Housing"]
+    assert top_merchant["intent"] == "top_merchants"
+    assert top_merchant["data"][0]["merchant"] == "Apartment Rent"
+    assert largest["intent"] == "largest_expenses"
+    assert largest["data"][0]["description"] == "Apartment Rent"
+    assert anomalies["intent"] == "anomalies"
+    assert anomalies["data"][0]["description"] == "One-Time Electronics Store"
+
+
 def test_parse_transactions_csv_supports_debit_credit_columns():
     csv_content = """Date,Description,Debit,Credit
 07/01/2026,Bookstore,12.30,
@@ -90,3 +139,7 @@ def test_parse_transactions_csv_supports_debit_credit_columns():
 
 def test_money_to_cents_handles_parentheses():
     assert money_to_cents("($42.19)") == -4219
+
+
+def test_infer_month_supports_named_months():
+    assert infer_month("How much did I spend in July 2026?") == "2026-07"

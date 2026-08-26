@@ -10,8 +10,9 @@ The first implementation slice focuses on trustworthy analytics:
 - SQLite transaction storage
 - Rule-based starter categorization
 - Monthly spending summaries
+- Month, category, merchant, and trend analytics
 - Basic anomaly detection
-- Deterministic question answering for common spending questions
+- Deterministic question answering for spending, income, category, merchant, largest expense, and anomaly questions
 - React dashboard scaffold
 - GitHub Actions backend test workflow
 
@@ -82,6 +83,19 @@ Upload `data/sample_transactions.csv` through the frontend or API. Then ask:
 
 ```text
 How much did I spend on food last month?
+```
+
+Useful API endpoints:
+
+```text
+GET  /summary?month=2026-07
+GET  /months
+GET  /categories?month=2026-07
+GET  /trends
+GET  /merchants?month=2026-07
+GET  /expenses/largest?month=2026-07
+GET  /anomalies?month=2026-07
+POST /ask
 ```
 
 ## Notes
