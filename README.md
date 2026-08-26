@@ -13,6 +13,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Basic anomaly detection
 - Deterministic question answering for common spending questions
 - React dashboard scaffold
+- GitHub Actions backend test workflow
 
 Future AI layers can improve categorization, explain trends, and add RAG over statement
 notes and transaction context.
@@ -87,3 +88,14 @@ How much did I spend on food last month?
 
 Use synthetic or exported demo data while developing. Do not commit real bank
 statements, account numbers, or private financial records.
+
+## Tests
+
+Run backend tests locally:
+
+```bash
+cd backend
+pytest
+```
+
+GitHub Actions runs the same backend test suite on pushes and pull requests.
