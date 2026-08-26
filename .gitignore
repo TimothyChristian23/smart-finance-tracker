@@ -9,5 +9,6 @@ node_modules/
 dist/
 .DS_Store
 data/*.sqlite3
+backend/data/
 data/uploads/
 data/statements/
