@@ -1,0 +1,13 @@
+.env
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+node_modules/
+dist/
+.DS_Store
+data/*.sqlite3
+data/uploads/
+data/statements/

@@ -1,0 +1,249 @@
+"""SQLite storage and analytics helpers."""
+from __future__ import annotations
+
+import os
+import sqlite3
+from datetime import date
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def get_db_path() -> Path:
+    """Return the configured SQLite database path."""
+    return Path(os.getenv("FINANCE_DB_PATH", "./data/finance.sqlite3"))
+
+
+def connect() -> sqlite3.Connection:
+    """Open a SQLite connection and initialize schema."""
+    db_path = get_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    return conn
+
+
+def init_db(conn: sqlite3.Connection) -> None:
+    """Create database tables if they do not exist."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_date TEXT NOT NULL,
+            description TEXT NOT NULL,
+            amount_cents INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            source_file TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_transactions_date
+        ON transactions (transaction_date)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_transactions_category
+        ON transactions (category)
+        """
+    )
+    conn.commit()
+
+
+def reset_db() -> None:
+    """Delete all stored transactions."""
+    with connect() as conn:
+        conn.execute("DELETE FROM transactions")
+        conn.commit()
+
+
+def insert_transactions(rows: list[dict]) -> int:
+    """Insert parsed transactions and return the inserted count."""
+    if not rows:
+        return 0
+
+    with connect() as conn:
+        conn.executemany(
+            """
+            INSERT INTO transactions (
+                transaction_date,
+                description,
+                amount_cents,
+                category,
+                source_file
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["date"],
+                    row["description"],
+                    row["amount_cents"],
+                    row["category"],
+                    row.get("source_file"),
+                )
+                for row in rows
+            ],
+        )
+        conn.commit()
+    return len(rows)
+
+
+def list_transactions(limit: int = 200) -> list[dict]:
+    """Return recent transactions."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file
+            FROM transactions
+            ORDER BY transaction_date DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [_transaction_row_to_dict(row) for row in rows]
+
+
+def monthly_summary(month: str | None = None) -> dict:
+    """Return spending, income, and category totals for a month or all data."""
+    where_sql, params = _month_filter(month)
+    with connect() as conn:
+        totals = conn.execute(
+            f"""
+            SELECT
+                COALESCE(SUM(CASE WHEN amount_cents < 0 THEN ABS(amount_cents) ELSE 0 END), 0) AS spending_cents,
+                COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0) AS income_cents,
+                COALESCE(SUM(amount_cents), 0) AS net_cents,
+                COUNT(*) AS transaction_count
+            FROM transactions
+            {where_sql}
+            """,
+            params,
+        ).fetchone()
+        category_rows = conn.execute(
+            f"""
+            SELECT category, COALESCE(SUM(ABS(amount_cents)), 0) AS total_cents
+            FROM transactions
+            {where_sql}
+              {"AND" if where_sql else "WHERE"} amount_cents < 0
+            GROUP BY category
+            ORDER BY total_cents DESC
+            """,
+            params,
+        ).fetchall()
+
+    return {
+        "month": month,
+        "total_spending": cents_to_dollars(totals["spending_cents"]),
+        "total_income": cents_to_dollars(totals["income_cents"]),
+        "net": cents_to_dollars(totals["net_cents"]),
+        "transaction_count": totals["transaction_count"],
+        "categories": [
+            {
+                "category": row["category"],
+                "total": cents_to_dollars(row["total_cents"]),
+            }
+            for row in category_rows
+        ],
+    }
+
+
+def spending_for_categories(categories: list[str], month: str | None = None) -> int:
+    """Return spending cents for the requested categories."""
+    if not categories:
+        return 0
+
+    month_sql, month_params = _month_filter(month)
+    placeholders = ", ".join("?" for _ in categories)
+    category_clause = f"category IN ({placeholders})"
+    sql = f"""
+        SELECT COALESCE(SUM(ABS(amount_cents)), 0) AS spending_cents
+        FROM transactions
+        {month_sql}
+          {"AND" if month_sql else "WHERE"} amount_cents < 0
+          AND {category_clause}
+    """
+    with connect() as conn:
+        row = conn.execute(sql, [*month_params, *categories]).fetchone()
+    return int(row["spending_cents"])
+
+
+def detect_anomalies(limit: int = 10) -> list[dict]:
+    """Return unusually large expenses compared with each category average."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            WITH category_stats AS (
+                SELECT
+                    category,
+                    AVG(ABS(amount_cents)) AS avg_cents,
+                    COUNT(*) AS transaction_count
+                FROM transactions
+                WHERE amount_cents < 0
+                GROUP BY category
+            )
+            SELECT
+                t.id,
+                t.transaction_date,
+                t.description,
+                t.amount_cents,
+                t.category,
+                t.source_file,
+                s.avg_cents,
+                s.transaction_count
+            FROM transactions t
+            JOIN category_stats s ON t.category = s.category
+            WHERE t.amount_cents < 0
+              AND s.transaction_count >= 2
+              AND ABS(t.amount_cents) >= s.avg_cents * 1.8
+            ORDER BY ABS(t.amount_cents) DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    anomalies = []
+    for row in rows:
+        transaction = _transaction_row_to_dict(row)
+        transaction["average_category_spend"] = cents_to_dollars(row["avg_cents"])
+        transaction["reason"] = "Expense is at least 80% higher than this category average."
+        anomalies.append(transaction)
+    return anomalies
+
+
+def cents_to_dollars(cents: int | float) -> float:
+    """Convert cents to a rounded dollar amount."""
+    return round(float(cents) / 100, 2)
+
+
+def _transaction_row_to_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "date": row["transaction_date"],
+        "description": row["description"],
+        "amount": cents_to_dollars(row["amount_cents"]),
+        "category": row["category"],
+        "source_file": row["source_file"],
+    }
+
+
+def _month_filter(month: str | None) -> tuple[str, list[str]]:
+    if not month:
+        return "", []
+
+    start = date.fromisoformat(f"{month}-01")
+    if start.month == 12:
+        end = date(start.year + 1, 1, 1)
+    else:
+        end = date(start.year, start.month + 1, 1)
+
+    return (
+        "WHERE transaction_date >= ? AND transaction_date < ?",
+        [start.isoformat(), end.isoformat()],
+    )
