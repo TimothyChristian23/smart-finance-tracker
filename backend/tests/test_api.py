@@ -76,6 +76,33 @@ def test_duplicate_upload_skips_existing_transactions():
     assert summary["total_spending"] == 2840.87
 
 
+def test_pdf_upload_imports_text_statement_rows():
+    pdf_bytes = make_pdf_bytes([
+        "Account Statement",
+        "Date Description Amount Balance",
+        "2026-09-01 Payroll Deposit 3200.00 4200.00",
+        "2026-09-02 Trader Joes -86.42 4113.58",
+        "09/05/2026 Blue Bottle Coffee ($6.75) 4106.83",
+        "2026-09-10 Apartment Rent -1450.00 2656.83",
+    ])
+
+    response = client.post(
+        "/transactions/upload",
+        files={"file": ("statement.pdf", pdf_bytes, "application/pdf")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["imported"] == 4
+    assert payload["duplicates_skipped"] == 0
+
+    summary = client.get("/summary?month=2026-09").json()
+    assert summary["total_income"] == 3200.0
+    assert summary["total_spending"] == 1543.17
+    assert summary["transaction_count"] == 4
+    assert summary["categories"][0] == {"category": "Housing", "total": 1450.0}
+
+
 def test_ask_food_question_uses_exact_transaction_totals():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
 
@@ -165,3 +192,44 @@ def test_money_to_cents_handles_parentheses():
 
 def test_infer_month_supports_named_months():
     assert infer_month("How much did I spend in July 2026?") == "2026-07"
+
+
+def make_pdf_bytes(lines: list[str]) -> bytes:
+    """Create a tiny text PDF fixture for parser tests."""
+    stream_lines = ["BT", "/F1 12 Tf", "72 720 Td"]
+    for index, line in enumerate(lines):
+        if index:
+            stream_lines.append("0 -16 Td")
+        stream_lines.append(f"({escape_pdf_text(line)}) Tj")
+    stream_lines.append("ET")
+    stream = "\n".join(stream_lines).encode("ascii")
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+
+    parts = [b"%PDF-1.4\n"]
+    offsets = [0]
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(sum(len(part) for part in parts))
+        parts.append(f"{number} 0 obj\n".encode("ascii") + obj + b"\nendobj\n")
+
+    xref_offset = sum(len(part) for part in parts)
+    parts.append(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    parts.append(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        parts.append(f"{offset:010d} 00000 n \n".encode("ascii"))
+    parts.append(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n".encode("ascii")
+    )
+    return b"".join(parts)
+
+
+def escape_pdf_text(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")

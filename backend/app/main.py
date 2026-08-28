@@ -5,12 +5,13 @@ import csv
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from pypdf import PdfReader
 
 from app.categorization import categories_from_question, categorize_transaction
 from app.database import (
@@ -116,13 +117,20 @@ async def health() -> dict:
 
 @app.post("/transactions/upload", response_model=UploadResponse)
 async def upload_transactions(file: UploadFile = File(...)) -> UploadResponse:
-    """Upload a CSV bank statement and import transactions."""
+    """Upload a CSV or text-based PDF bank statement and import transactions."""
     filename = Path(file.filename or "transactions.csv").name
-    if Path(filename).suffix.lower() != ".csv":
-        raise HTTPException(status_code=400, detail="Only CSV uploads are supported in this first slice.")
+    suffix = Path(filename).suffix.lower()
+    content = await file.read()
+    if suffix == ".csv":
+        try:
+            rows = parse_transactions_csv(content.decode("utf-8-sig"), filename)
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail="CSV file must be UTF-8 text.") from exc
+    elif suffix == ".pdf":
+        rows = parse_transactions_pdf(content, filename)
+    else:
+        raise HTTPException(status_code=400, detail="Only CSV or text-based PDF uploads are supported.")
 
-    content = (await file.read()).decode("utf-8-sig")
-    rows = parse_transactions_csv(content, filename)
     result = insert_transactions(rows)
     return UploadResponse(
         filename=filename,
@@ -355,6 +363,83 @@ def parse_transactions_csv(content: str, source_file: str) -> list[dict]:
         raise HTTPException(status_code=400, detail="CSV file does not contain any transactions.")
 
     return rows
+
+
+def parse_transactions_pdf(content: bytes, source_file: str) -> list[dict]:
+    """Parse transaction rows from a text-based PDF statement."""
+    try:
+        reader = PdfReader(BytesIO(content))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read PDF text. Scanned image PDFs are not supported yet.",
+        ) from exc
+
+    return parse_transactions_text(text, source_file)
+
+
+def parse_transactions_text(content: str, source_file: str) -> list[dict]:
+    """Parse transaction-like rows from extracted statement text."""
+    has_balance_column = bool(re.search(r"\bbalance\b", content, flags=re.IGNORECASE))
+    rows = []
+    for line_number, line in enumerate(content.splitlines(), start=1):
+        normalized = re.sub(r"\s+", " ", line).strip()
+        if not normalized:
+            continue
+
+        try:
+            row = parse_statement_text_line(normalized, has_balance_column)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"PDF line {line_number}: {exc}") from exc
+        if row:
+            row["source_file"] = source_file
+            rows.append(row)
+
+    if not rows:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "PDF did not contain recognizable transaction rows. Expected rows like "
+                "'2026-07-02 Trader Joes -86.42'."
+            ),
+        )
+
+    return rows
+
+
+def parse_statement_text_line(line: str, has_balance_column: bool = False) -> dict | None:
+    """Parse one extracted PDF text line into a normalized transaction row."""
+    row_match = re.match(
+        r"^(?P<date>\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})\s+(?P<body>.+)$",
+        line,
+    )
+    if not row_match:
+        return None
+
+    body = row_match.group("body").strip()
+    amount_match = re.search(
+        r"(?P<first>\(?-?\$?\d[\d,]*\.\d{2}\)?|\$?\(\d[\d,]*\.\d{2}\))"
+        r"(?:\s+(?P<second>\(?-?\$?\d[\d,]*\.\d{2}\)?|\$?\(\d[\d,]*\.\d{2}\)))?$",
+        body,
+    )
+    if not amount_match:
+        return None
+
+    amount_group = "first" if has_balance_column and amount_match.group("second") else "second"
+    amount_text = amount_match.group(amount_group) or amount_match.group("first")
+    description_end = amount_match.start(amount_group) if amount_match.group(amount_group) else amount_match.start("first")
+    description = body[:description_end].strip()
+    if not description:
+        raise ValueError("missing transaction description")
+
+    amount_cents = money_to_cents(amount_text)
+    return {
+        "date": parse_date(row_match.group("date")),
+        "description": description,
+        "amount_cents": amount_cents,
+        "category": categorize_transaction(description, amount_cents),
+    }
 
 
 def get_column(raw_row: dict, candidates: list[str], required: bool = True) -> str:

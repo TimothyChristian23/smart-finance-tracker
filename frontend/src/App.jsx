@@ -97,7 +97,7 @@ export default function App() {
     event.preventDefault();
     const file = event.currentTarget.elements.statement.files[0];
     if (!file) {
-      setUploadStatus("Choose a CSV statement first.");
+      setUploadStatus("Choose a statement file first.");
       return;
     }
 
@@ -227,11 +227,11 @@ export default function App() {
         </section>
 
         <section className="panel action-panel">
-          <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV" />
+          <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV/PDF" />
           <form className="upload-form" onSubmit={handleUpload}>
-            <input name="statement" type="file" accept=".csv,text/csv" />
+            <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" />
             <div className="button-row">
-              <button type="submit" disabled={busy}>Upload CSV</button>
+              <button type="submit" disabled={busy}>Upload Statement</button>
               <button className="ghost-button" type="button" disabled={busy || !transactions.length} onClick={handleClear}>
                 <Trash2 size={16} />
                 Clear

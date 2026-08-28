@@ -7,6 +7,7 @@ structured transaction data.
 The first implementation slice focuses on trustworthy analytics:
 
 - CSV transaction upload
+- Text-based PDF statement upload
 - SQLite transaction storage
 - Rule-based starter categorization
 - Monthly spending summaries
@@ -107,6 +108,14 @@ GET  /expenses/largest?month=2026-07
 GET  /anomalies?month=2026-07
 POST /ask
 ```
+
+PDF uploads are supported when the statement exposes selectable text with rows like:
+
+```text
+2026-07-02 Trader Joes -86.42
+```
+
+Statements that are scanned images will need OCR support before they can be imported.
 
 ## Notes
 
