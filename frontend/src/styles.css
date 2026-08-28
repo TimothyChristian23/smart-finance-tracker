@@ -1,17 +1,18 @@
 :root {
   color-scheme: light;
-  --bg: #f3f5f7;
+  --bg: #f4f6f8;
   --panel: #ffffff;
   --text: #17212b;
-  --muted: #607080;
-  --line: #dbe3ea;
-  --accent: #267a6d;
-  --accent-dark: #1d6056;
-  --ink: #26364a;
-  --warn: #b45f06;
+  --muted: #637386;
+  --line: #dce4ec;
+  --accent: #24786a;
+  --accent-dark: #195f54;
+  --blue: #315f9f;
+  --warn: #a45f20;
   --good: #217346;
   --bad: #b42318;
-  --shadow: 0 16px 42px rgba(31, 44, 59, 0.11);
+  --ink: #26364a;
+  --shadow: 0 14px 34px rgba(31, 44, 59, 0.1);
 }
 
 * {
@@ -35,6 +36,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -46,19 +48,19 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.58;
 }
 
 .app-shell {
-  width: min(1220px, calc(100% - 32px));
+  width: min(1280px, calc(100% - 32px));
   margin: 16px auto 28px;
 }
 
 .topbar {
   display: flex;
   justify-content: space-between;
-  gap: 20px;
-  align-items: center;
+  gap: 18px;
+  align-items: flex-start;
   margin-bottom: 16px;
 }
 
@@ -71,6 +73,13 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.updated {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 h1,
 h2 {
   margin: 0;
@@ -78,18 +87,19 @@ h2 {
 }
 
 h1 {
-  font-size: 1.7rem;
+  font-size: 1.72rem;
   line-height: 1.16;
 }
 
 h2 {
-  font-size: 1rem;
+  font-size: 0.98rem;
 }
 
 .topbar-actions {
   display: flex;
   align-items: center;
   gap: 9px;
+  min-height: 40px;
 }
 
 .topbar-actions label {
@@ -98,7 +108,7 @@ h2 {
   font-weight: 800;
 }
 
-.topbar-actions input,
+.topbar-actions select,
 .upload-form input,
 .ask-form textarea {
   border: 1px solid var(--line);
@@ -107,16 +117,17 @@ h2 {
   outline: none;
 }
 
-.topbar-actions input {
+.topbar-actions select {
+  min-width: 150px;
   min-height: 38px;
   padding: 7px 9px;
 }
 
-.topbar-actions input:focus,
+.topbar-actions select:focus,
 .upload-form input:focus,
 .ask-form textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(38, 122, 109, 0.16);
+  box-shadow: 0 0 0 3px rgba(36, 120, 106, 0.16);
 }
 
 .status {
@@ -166,8 +177,17 @@ h2 {
 }
 
 .metric {
-  min-height: 96px;
+  min-height: 100px;
   padding: 16px;
+  border-top: 4px solid var(--line);
+}
+
+.metric-income {
+  border-top-color: var(--blue);
+}
+
+.metric-spend {
+  border-top-color: var(--warn);
 }
 
 .metric span {
@@ -181,13 +201,14 @@ h2 {
   display: block;
   margin-top: 12px;
   color: var(--text);
-  font-size: 1.55rem;
-  line-height: 1.1;
+  font-size: clamp(1.16rem, 1rem + 0.8vw, 1.58rem);
+  line-height: 1.12;
+  overflow-wrap: anywhere;
 }
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.8fr) minmax(280px, 0.8fr);
   gap: 16px;
 }
 
@@ -200,12 +221,24 @@ h2 {
   grid-row: span 2;
 }
 
+.ask-panel {
+  grid-row: span 2;
+}
+
 .panel-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 14px;
   color: var(--ink);
+}
+
+.panel-title-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .panel-title svg {
@@ -213,9 +246,21 @@ h2 {
   flex-shrink: 0;
 }
 
+.panel-title span {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .chart-wrap {
+  display: grid;
+  min-height: 210px;
   width: 100%;
-  min-height: 260px;
+}
+
+.chart-empty {
+  place-self: center;
 }
 
 .upload-form,
@@ -232,17 +277,39 @@ h2 {
 .ask-form textarea {
   width: 100%;
   resize: vertical;
-  min-height: 86px;
+  min-height: 96px;
   padding: 10px;
   line-height: 1.45;
 }
 
 .upload-form button,
-.ask-form button {
+.ask-form button,
+.ghost-button {
+  display: inline-flex;
   min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-weight: 800;
+}
+
+.upload-form button,
+.ask-form button {
   background: var(--accent);
   color: #fff;
-  font-weight: 800;
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.ghost-button {
+  border: 1px solid var(--line);
+  background: #fff !important;
+  color: var(--ink) !important;
+  padding: 0 12px;
 }
 
 .helper-text,
@@ -254,11 +321,24 @@ h2 {
 }
 
 .answer {
+  display: grid;
+  gap: 6px;
   margin: 12px 0 0;
   border-left: 4px solid var(--accent);
   background: #eef8f6;
   padding: 10px 12px;
   line-height: 1.5;
+}
+
+.answer strong {
+  font-size: 0.96rem;
+}
+
+.answer span,
+.answer small {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
 .list {
@@ -270,6 +350,7 @@ h2 {
   display: flex;
   justify-content: space-between;
   gap: 10px;
+  min-height: 62px;
   border: 1px solid var(--line);
   padding: 10px;
 }
@@ -288,11 +369,16 @@ h2 {
   margin-top: 3px;
   color: var(--muted);
   font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .list-row b {
-  color: var(--warn);
+  color: var(--ink);
   white-space: nowrap;
+}
+
+.list-row b.warn {
+  color: var(--warn);
 }
 
 .transactions-panel {
@@ -301,7 +387,7 @@ h2 {
 
 .transaction-table {
   display: grid;
-  grid-template-columns: 120px minmax(180px, 1fr) 170px 120px;
+  grid-template-columns: 120px minmax(220px, 1fr) 170px 120px;
   gap: 0;
   margin-top: 12px;
   overflow-x: auto;
@@ -330,7 +416,7 @@ h2 {
   min-height: 26px;
   align-items: center;
   max-width: 100%;
-  border: 1px solid rgba(38, 122, 109, 0.26);
+  border: 1px solid rgba(36, 120, 106, 0.26);
   background: #eef8f6;
   color: var(--accent-dark);
   padding: 3px 8px;
@@ -346,11 +432,25 @@ h2 {
   color: var(--good);
 }
 
+@media (max-width: 1120px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr);
+  }
+
+  .ask-panel {
+    grid-row: auto;
+  }
+}
+
 @media (max-width: 900px) {
   .topbar,
   .topbar-actions {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .topbar-actions {
+    width: 100%;
   }
 
   .metrics-grid,
@@ -373,11 +473,15 @@ h2 {
     font-size: 1.34rem;
   }
 
-  .metric strong {
-    font-size: 1.28rem;
+  .metrics-grid {
+    gap: 10px;
+  }
+
+  .button-row {
+    grid-template-columns: 1fr;
   }
 
   .transaction-table {
-    grid-template-columns: 110px 180px 150px 100px;
+    grid-template-columns: 110px 200px 150px 105px;
   }
 }
