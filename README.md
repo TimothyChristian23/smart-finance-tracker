@@ -14,7 +14,8 @@ The first implementation slice focuses on trustworthy analytics:
 - Basic anomaly detection
 - Deterministic question answering for spending, income, category, merchant, largest expense, and anomaly questions
 - React dashboard scaffold
-- GitHub Actions backend test workflow
+- Locked frontend dependency install and production build
+- GitHub Actions backend test and frontend build workflows
 
 Future AI layers can improve categorization, explain trends, and add RAG over statement
 notes and transaction context.
@@ -30,6 +31,7 @@ smart-finance-tracker/
 |   |   `-- main.py
 |   |-- tests/
 |   |   `-- test_api.py
+|   |-- pytest.ini
 |   `-- requirements.txt
 |-- frontend/
 |   |-- src/
@@ -37,6 +39,7 @@ smart-finance-tracker/
 |   |   |-- main.jsx
 |   |   `-- styles.css
 |   |-- index.html
+|   |-- package-lock.json
 |   `-- package.json
 |-- data/
 |   `-- sample_transactions.csv
@@ -53,7 +56,7 @@ smart-finance-tracker/
 cd backend
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
@@ -69,6 +72,13 @@ http://localhost:8000/docs
 cd frontend
 npm install
 npm run dev
+```
+
+If npm fails on Windows with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, run the install with the Windows certificate store enabled:
+
+```powershell
+$env:NODE_OPTIONS="--use-system-ca"
+npm.cmd install
 ```
 
 Open the React app:
@@ -109,7 +119,14 @@ Run backend tests locally:
 
 ```bash
 cd backend
-pytest
+python -m pytest
 ```
 
-GitHub Actions runs the same backend test suite on pushes and pull requests.
+Run the frontend production build locally:
+
+```bash
+cd frontend
+npm run build
+```
+
+GitHub Actions runs backend tests and the frontend production build on pushes and pull requests.
