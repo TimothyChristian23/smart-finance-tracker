@@ -42,7 +42,9 @@ def test_upload_transactions_and_monthly_summary():
     )
 
     assert response.status_code == 200
-    assert response.json()["imported"] == 11
+    payload = response.json()
+    assert payload["imported"] == 11
+    assert payload["duplicates_skipped"] == 0
 
     response = client.get("/summary?month=2026-07")
     payload = response.json()
@@ -52,6 +54,26 @@ def test_upload_transactions_and_monthly_summary():
     assert payload["total_spending"] == 2840.87
     assert payload["transaction_count"] == 11
     assert payload["categories"][0] == {"category": "Housing", "total": 1450.0}
+
+
+def test_duplicate_upload_skips_existing_transactions():
+    first = client.post(
+        "/transactions/upload",
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    )
+    second = client.post(
+        "/transactions/upload",
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["imported"] == 0
+    assert second.json()["duplicates_skipped"] == 11
+
+    summary = client.get("/summary?month=2026-07").json()
+    assert summary["transaction_count"] == 11
+    assert summary["total_spending"] == 2840.87
 
 
 def test_ask_food_question_uses_exact_transaction_totals():

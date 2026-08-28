@@ -63,37 +63,66 @@ def reset_db() -> None:
         conn.commit()
 
 
-def insert_transactions(rows: list[dict]) -> int:
-    """Insert parsed transactions and return the inserted count."""
+def insert_transactions(rows: list[dict]) -> dict:
+    """Insert parsed transactions and return inserted/skipped counts."""
+    result = {"inserted": 0, "skipped": 0}
     if not rows:
-        return 0
+        return result
 
     with connect() as conn:
-        conn.executemany(
-            """
-            INSERT INTO transactions (
-                transaction_date,
-                description,
-                amount_cents,
-                category,
-                source_file
+        for row in rows:
+            values = (
+                row["date"],
+                row["description"],
+                row["amount_cents"],
+                row["category"],
+                row.get("source_file"),
             )
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    row["date"],
-                    row["description"],
-                    row["amount_cents"],
-                    row["category"],
-                    row.get("source_file"),
-                )
-                for row in rows
-            ],
-        )
-        conn.commit()
-    return len(rows)
+            if transaction_exists(conn, values):
+                result["skipped"] += 1
+                continue
 
+            conn.execute(
+                """
+                INSERT INTO transactions (
+                    transaction_date,
+                    description,
+                    amount_cents,
+                    category,
+                    source_file
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+            result["inserted"] += 1
+        conn.commit()
+    return result
+
+
+def transaction_exists(conn: sqlite3.Connection, values: tuple) -> bool:
+    """Return whether an equivalent transaction from the same source exists."""
+    transaction_date, description, amount_cents, _category, source_file = values
+    if source_file is None:
+        source_sql = "source_file IS NULL"
+        params = [transaction_date, description, amount_cents]
+    else:
+        source_sql = "source_file = ?"
+        params = [transaction_date, description, amount_cents, source_file]
+
+    row = conn.execute(
+        f"""
+        SELECT 1
+        FROM transactions
+        WHERE transaction_date = ?
+          AND description = ?
+          AND amount_cents = ?
+          AND {source_sql}
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    return row is not None
 
 def list_transactions(limit: int = 200) -> list[dict]:
     """Return recent transactions."""

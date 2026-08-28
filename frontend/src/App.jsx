@@ -111,7 +111,10 @@ export default function App() {
         method: "POST",
         body: formData,
       });
-      setUploadStatus(`Imported ${payload.imported} transactions from ${payload.filename}.`);
+      const skipped = payload.duplicates_skipped || 0;
+      setUploadStatus(skipped
+        ? `Imported ${payload.imported} transactions and skipped ${skipped} duplicates from ${payload.filename}.`
+        : `Imported ${payload.imported} transactions from ${payload.filename}.`);
       event.currentTarget.reset();
       await refreshDashboard();
     } catch (error) {

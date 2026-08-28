@@ -42,6 +42,7 @@ app.add_middleware(
 class UploadResponse(BaseModel):
     filename: str
     imported: int
+    duplicates_skipped: int = 0
 
 
 class TransactionResponse(BaseModel):
@@ -122,8 +123,12 @@ async def upload_transactions(file: UploadFile = File(...)) -> UploadResponse:
 
     content = (await file.read()).decode("utf-8-sig")
     rows = parse_transactions_csv(content, filename)
-    imported = insert_transactions(rows)
-    return UploadResponse(filename=filename, imported=imported)
+    result = insert_transactions(rows)
+    return UploadResponse(
+        filename=filename,
+        imported=result["inserted"],
+        duplicates_skipped=result["skipped"],
+    )
 
 
 @app.get("/transactions", response_model=list[TransactionResponse])
