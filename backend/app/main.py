@@ -13,20 +13,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
-from app.categorization import categories_from_question, categorize_transaction
+from app.categorization import CATEGORY_OPTIONS, categories_from_question, categorize_transaction
 from app.database import (
     available_months,
     category_totals,
     cents_to_dollars,
+    delete_merchant_rule,
     detect_anomalies,
     insert_transactions,
     largest_expenses,
+    list_merchant_rules,
     list_transactions,
     monthly_summary,
     monthly_trends,
     reset_db,
     spending_for_categories,
     top_merchants,
+    update_transaction_category,
 )
 
 app = FastAPI(title="Smart Personal Finance Tracker API", version="0.1.0")
@@ -53,6 +56,19 @@ class TransactionResponse(BaseModel):
     amount: float
     category: str
     source_file: str | None = None
+
+
+class CategoryUpdateRequest(BaseModel):
+    category: str = Field(..., min_length=1, max_length=80)
+    remember: bool = False
+
+
+class MerchantRuleResponse(BaseModel):
+    id: int
+    merchant: str
+    merchant_key: str
+    category: str
+    updated_at: str
 
 
 class SummaryCategory(BaseModel):
@@ -142,6 +158,32 @@ async def upload_transactions(file: UploadFile = File(...)) -> UploadResponse:
 @app.get("/transactions", response_model=list[TransactionResponse])
 async def transactions(limit: int = 200) -> list[dict]:
     return list_transactions(limit=limit)
+
+
+@app.patch("/transactions/{transaction_id}/category", response_model=TransactionResponse)
+async def update_category(transaction_id: int, request: CategoryUpdateRequest) -> dict:
+    category = validate_category(request.category)
+    transaction = update_transaction_category(transaction_id, category, remember=request.remember)
+    if transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    return transaction
+
+
+@app.get("/category-options", response_model=list[str])
+async def category_options() -> list[str]:
+    return CATEGORY_OPTIONS
+
+
+@app.get("/merchant-rules", response_model=list[MerchantRuleResponse])
+async def merchant_rules() -> list[dict]:
+    return list_merchant_rules()
+
+
+@app.delete("/merchant-rules/{rule_id}")
+async def remove_merchant_rule(rule_id: int) -> dict:
+    if not delete_merchant_rule(rule_id):
+        raise HTTPException(status_code=404, detail="Merchant rule not found.")
+    return {"message": "Merchant rule deleted."}
 
 
 @app.get("/summary", response_model=SummaryResponse)
@@ -521,6 +563,17 @@ def validate_month(month: str | None) -> str | None:
     if month and not re.fullmatch(r"\d{4}-\d{2}", month):
         raise HTTPException(status_code=400, detail="month must use YYYY-MM format.")
     return month
+
+
+def validate_category(category: str) -> str:
+    normalized = category.strip().lower()
+    for option in CATEGORY_OPTIONS:
+        if option.lower() == normalized:
+            return option
+    raise HTTPException(
+        status_code=400,
+        detail=f"category must be one of: {', '.join(CATEGORY_OPTIONS)}.",
+    )
 
 
 def bounded_limit(limit: int, maximum: int = 100) -> int:

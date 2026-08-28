@@ -10,6 +10,8 @@ The first implementation slice focuses on trustworthy analytics:
 - Text-based PDF statement upload
 - SQLite transaction storage
 - Rule-based starter categorization
+- Editable transaction categories
+- Saved merchant rules that apply to future imports
 - Monthly spending summaries
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection
@@ -102,10 +104,14 @@ Useful API endpoints:
 GET  /summary?month=2026-07
 GET  /months
 GET  /categories?month=2026-07
+GET  /category-options
 GET  /trends
 GET  /merchants?month=2026-07
+GET  /merchant-rules
 GET  /expenses/largest?month=2026-07
 GET  /anomalies?month=2026-07
+PATCH /transactions/{id}/category
+DELETE /merchant-rules/{id}
 POST /ask
 ```
 

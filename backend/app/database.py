@@ -8,6 +8,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from app.categorization import normalize_text
+
 load_dotenv()
 
 
@@ -53,6 +55,18 @@ def init_db(conn: sqlite3.Connection) -> None:
         ON transactions (category)
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS merchant_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            merchant_key TEXT NOT NULL UNIQUE,
+            merchant_name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     conn.commit()
 
 
@@ -71,11 +85,12 @@ def insert_transactions(rows: list[dict]) -> dict:
 
     with connect() as conn:
         for row in rows:
+            category = merchant_rule_for_description(conn, row["description"]) or row["category"]
             values = (
                 row["date"],
                 row["description"],
                 row["amount_cents"],
-                row["category"],
+                category,
                 row.get("source_file"),
             )
             if transaction_exists(conn, values):
@@ -123,6 +138,110 @@ def transaction_exists(conn: sqlite3.Connection, values: tuple) -> bool:
         params,
     ).fetchone()
     return row is not None
+
+
+def merchant_rule_for_description(conn: sqlite3.Connection, description: str) -> str | None:
+    """Return the learned category for an exact merchant description, if any."""
+    row = conn.execute(
+        """
+        SELECT category
+        FROM merchant_rules
+        WHERE merchant_key = ?
+        """,
+        (normalize_text(description),),
+    ).fetchone()
+    return row["category"] if row else None
+
+
+def list_merchant_rules() -> list[dict]:
+    """Return saved merchant category rules."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, merchant_name, merchant_key, category, updated_at
+            FROM merchant_rules
+            ORDER BY merchant_name
+            """
+        ).fetchall()
+    return [_merchant_rule_row_to_dict(row) for row in rows]
+
+
+def update_transaction_category(transaction_id: int, category: str, remember: bool = False) -> dict | None:
+    """Update one transaction category and optionally save a merchant rule."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        if row is None:
+            return None
+
+        merchant_key = normalize_text(row["description"])
+        if remember:
+            upsert_merchant_rule(conn, row["description"], category)
+            conn.execute(
+                """
+                UPDATE transactions
+                SET category = ?
+                WHERE id = ?
+                   OR lower(trim(description)) = ?
+                """,
+                (category, transaction_id, merchant_key),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE transactions
+                SET category = ?
+                WHERE id = ?
+                """,
+                (category, transaction_id),
+            )
+        conn.commit()
+
+        updated = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+    return _transaction_row_to_dict(updated)
+
+
+def upsert_merchant_rule(conn: sqlite3.Connection, merchant_name: str, category: str) -> None:
+    """Insert or update an exact merchant category rule."""
+    conn.execute(
+        """
+        INSERT INTO merchant_rules (merchant_key, merchant_name, category)
+        VALUES (?, ?, ?)
+        ON CONFLICT(merchant_key) DO UPDATE SET
+            merchant_name = excluded.merchant_name,
+            category = excluded.category,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (normalize_text(merchant_name), merchant_name, category),
+    )
+
+
+def delete_merchant_rule(rule_id: int) -> bool:
+    """Delete a merchant rule by id."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM merchant_rules
+            WHERE id = ?
+            """,
+            (rule_id,),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
 
 def list_transactions(limit: int = 200) -> list[dict]:
     """Return recent transactions."""
@@ -400,6 +519,16 @@ def _transaction_row_to_dict(row: sqlite3.Row) -> dict:
         "amount": cents_to_dollars(row["amount_cents"]),
         "category": row["category"],
         "source_file": row["source_file"],
+    }
+
+
+def _merchant_rule_row_to_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "merchant": row["merchant_name"],
+        "merchant_key": row["merchant_key"],
+        "category": row["category"],
+        "updated_at": row["updated_at"],
     }
 
 

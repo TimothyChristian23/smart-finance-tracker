@@ -15,6 +15,8 @@ CATEGORY_KEYWORDS = {
     "Subscriptions": ["netflix", "spotify", "hulu", "subscription"],
 }
 
+CATEGORY_OPTIONS = [*CATEGORY_KEYWORDS.keys(), "Other"]
+
 QUESTION_CATEGORY_KEYWORDS = {
     "food": ["Food & Grocery", "Dining"],
     "groceries": ["Food & Grocery"],

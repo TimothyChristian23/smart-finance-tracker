@@ -9,9 +9,10 @@ AI-ready product surface.
 2. The backend parses common CSV columns or extracts transaction-like rows from PDF text.
 3. Transactions are normalized into SQLite with cent-based amounts.
 4. Starter categorization rules assign categories from merchant descriptions.
-5. Dashboard endpoints return recent transactions, monthly category summaries, merchants, trends, largest expenses, and anomalies.
-6. The question endpoint routes common finance questions to exact SQL-backed totals and rankings.
-7. The React frontend uploads statements and displays summaries, anomalies, and a finance Q&A panel.
+5. Users can correct transaction categories and save exact merchant rules for future imports.
+6. Dashboard endpoints return recent transactions, monthly category summaries, merchants, trends, largest expenses, anomalies, and saved rules.
+7. The question endpoint routes common finance questions to exact SQL-backed totals and rankings.
+8. The React frontend uploads statements and displays summaries, anomalies, editable categories, saved rules, and a finance Q&A panel.
 
 ## Trust Boundary
 
@@ -21,7 +22,7 @@ but arithmetic should stay deterministic.
 
 ## Future AI Layer
 
-- AI-assisted category suggestions with user review
+- Smarter category suggestions with user review
 - RAG over uploaded statements and user notes
 - Natural-language query routing to structured SQL calculations
 - Monthly narrative summaries with cited transaction evidence

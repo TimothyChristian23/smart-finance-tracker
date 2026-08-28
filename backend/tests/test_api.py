@@ -76,6 +76,79 @@ def test_duplicate_upload_skips_existing_transactions():
     assert summary["total_spending"] == 2840.87
 
 
+def test_update_transaction_category_recalculates_summary():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "One-Time Electronics Store"
+    )
+
+    response = client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Other"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["category"] == "Other"
+
+    totals = {
+        item["category"]: item["total"]
+        for item in client.get("/categories?month=2026-07").json()
+    }
+    assert totals["Other"] == 899.0
+    assert totals["Shopping"] == 65.2
+
+
+def test_remembered_merchant_rule_applies_to_future_imports():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Trader Joes"
+    )
+
+    response = client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["category"] == "Dining"
+
+    rules = client.get("/merchant-rules").json()
+    assert rules == [{
+        "id": rules[0]["id"],
+        "merchant": "Trader Joes",
+        "merchant_key": "trader joes",
+        "category": "Dining",
+        "updated_at": rules[0]["updated_at"],
+    }]
+
+    client.post("/transactions/upload", files={"file": ("next.csv", SAMPLE_CSV, "text/csv")})
+    transactions = client.get("/transactions?limit=50").json()
+    next_trader_joes = next(
+        item for item in transactions
+        if item["description"] == "Trader Joes" and item["source_file"] == "next.csv"
+    )
+    assert next_trader_joes["category"] == "Dining"
+
+    delete_response = client.delete(f"/merchant-rules/{rules[0]['id']}")
+    assert delete_response.status_code == 200
+    assert client.get("/merchant-rules").json() == []
+
+
+def test_unknown_transaction_category_is_rejected():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = client.get("/transactions").json()[0]
+
+    response = client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Mystery"},
+    )
+
+    assert response.status_code == 400
+    assert "category must be one of" in response.json()["detail"]
+
+
 def test_pdf_upload_imports_text_statement_rows():
     pdf_bytes = make_pdf_bytes([
         "Account Statement",

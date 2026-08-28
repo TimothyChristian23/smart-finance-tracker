@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
+  BookmarkPlus,
   CircleDollarSign,
   FileUp,
   MessageSquare,
@@ -36,11 +37,14 @@ export default function App() {
   const [trends, setTrends] = useState([]);
   const [merchants, setMerchants] = useState([]);
   const [largestExpenses, setLargestExpenses] = useState([]);
+  const [categoryOptions, setCategoryOptions] = useState([]);
+  const [merchantRules, setMerchantRules] = useState([]);
   const [month, setMonth] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [answer, setAnswer] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [updatingTransactionId, setUpdatingTransactionId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState("");
 
   const selectedMonthLabel = month || "All imported data";
@@ -64,6 +68,8 @@ export default function App() {
         trendPayload,
         merchantPayload,
         largestPayload,
+        categoryOptionsPayload,
+        merchantRulesPayload,
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
         request("/transactions?limit=12"),
@@ -72,6 +78,8 @@ export default function App() {
         request("/trends?limit=12"),
         request(`/merchants${queryString({ month: activeMonth, limit: 6 })}`),
         request(`/expenses/largest${queryString({ month: activeMonth, limit: 6 })}`),
+        request("/category-options"),
+        request("/merchant-rules"),
       ]);
 
       setMonths(monthsPayload);
@@ -82,6 +90,8 @@ export default function App() {
       setTrends(trendPayload);
       setMerchants(merchantPayload);
       setLargestExpenses(largestPayload);
+      setCategoryOptions(categoryOptionsPayload);
+      setMerchantRules(merchantRulesPayload);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
     } catch (error) {
       setHealth("Offline");
@@ -153,6 +163,40 @@ export default function App() {
       setUploadStatus("Transactions cleared.");
       setAnswer(null);
       setMonth("");
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCategoryChange(transaction, category, remember = false) {
+    if (!remember && transaction.category === category) return;
+
+    setUpdatingTransactionId(transaction.id);
+    try {
+      await request(`/transactions/${transaction.id}/category`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category, remember }),
+      });
+      setUploadStatus(remember
+        ? `Saved ${category} rule for ${transaction.description}.`
+        : `Updated ${transaction.description} to ${category}.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setUpdatingTransactionId(null);
+    }
+  }
+
+  async function handleDeleteRule(rule) {
+    setBusy(true);
+    try {
+      await request(`/merchant-rules/${rule.id}`, { method: "DELETE" });
+      setUploadStatus(`Removed rule for ${rule.merchant}.`);
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -255,6 +299,11 @@ export default function App() {
           <MoneyList items={merchants} emptyText="No merchant spend yet." getTitle={(item) => item.merchant} getSubtitle={(item) => item.category} />
         </section>
 
+        <section className="panel rules-panel">
+          <PanelTitle icon={<BookmarkPlus size={18} />} title="Merchant Rules" detail={`${merchantRules.length} saved`} />
+          <RuleList rules={merchantRules} busy={busy} onDelete={handleDeleteRule} />
+        </section>
+
         <section className="panel">
           <PanelTitle icon={<ReceiptText size={18} />} title="Largest Expenses" detail={selectedMonthLabel} />
           <MoneyList items={largestExpenses} emptyText="No expenses yet." getTitle={(item) => item.description} getSubtitle={(item) => `${item.category} on ${item.date}`} />
@@ -274,7 +323,13 @@ export default function App() {
           <div className="table-heading">Category</div>
           <div className="table-heading align-right">Amount</div>
           {recentTransactions.map((transaction) => (
-            <TransactionRow key={transaction.id} transaction={transaction} />
+            <TransactionRow
+              categoryOptions={categoryOptions}
+              key={transaction.id}
+              onCategoryChange={handleCategoryChange}
+              transaction={transaction}
+              updating={updatingTransactionId === transaction.id}
+            />
           ))}
         </div>
         {!recentTransactions.length && <p className="empty">No transactions imported.</p>}
@@ -326,6 +381,33 @@ function MoneyList({ items, emptyText, getTitle, getSubtitle, tone = "default" }
   );
 }
 
+function RuleList({ rules, busy, onDelete }) {
+  if (!rules.length) return <p className="empty">No saved merchant rules.</p>;
+
+  return (
+    <div className="list">
+      {rules.map((rule) => (
+        <div className="list-row rule-row" key={rule.id}>
+          <div>
+            <strong>{rule.merchant}</strong>
+            <span>{rule.category}</span>
+          </div>
+          <button
+            aria-label={`Delete rule for ${rule.merchant}`}
+            className="row-icon-button"
+            disabled={busy}
+            onClick={() => onDelete(rule)}
+            title="Delete rule"
+            type="button"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AnswerCard({ answer }) {
   return (
     <div className="answer">
@@ -336,16 +418,55 @@ function AnswerCard({ answer }) {
   );
 }
 
-function TransactionRow({ transaction }) {
+function TransactionRow({ categoryOptions, onCategoryChange, transaction, updating }) {
   return (
     <>
       <div>{transaction.date}</div>
       <div>{transaction.description}</div>
-      <div><span className="category-pill">{transaction.category}</span></div>
+      <div>
+        <CategoryEditor
+          options={categoryOptions}
+          onCategoryChange={onCategoryChange}
+          transaction={transaction}
+          updating={updating}
+        />
+      </div>
       <div className={`align-right ${transaction.amount < 0 ? "negative" : "positive"}`}>
         {money(transaction.amount)}
       </div>
     </>
+  );
+}
+
+function CategoryEditor({ options, onCategoryChange, transaction, updating }) {
+  if (!options.length) {
+    return <span className="category-pill">{transaction.category}</span>;
+  }
+
+  return (
+    <div className="category-editor">
+      <select
+        aria-label={`Category for ${transaction.description}`}
+        className="category-select"
+        disabled={updating}
+        onChange={(event) => onCategoryChange(transaction, event.target.value)}
+        value={transaction.category}
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>{option}</option>
+        ))}
+      </select>
+      <button
+        aria-label={`Save merchant rule for ${transaction.description}`}
+        className="row-icon-button"
+        disabled={updating}
+        onClick={() => onCategoryChange(transaction, transaction.category, true)}
+        title="Save merchant rule"
+        type="button"
+      >
+        <BookmarkPlus size={15} />
+      </button>
+    </div>
   );
 }
 
