@@ -343,6 +343,26 @@ def test_budget_api_rejects_unknown_category():
     assert "category must be one of" in response.json()["detail"]
 
 
+def test_monthly_insights_composes_report_signals():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    client.put("/budgets", json={"month": "2026-07", "category": "Housing", "amount": 1200})
+
+    response = client.get("/insights/monthly?month=2026-07")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["month"] == "2026-07"
+    assert payload["summary"]["total_spending"] == 2840.87
+    assert payload["top_category"]["category"] == "Housing"
+    assert payload["top_merchant"]["merchant"] == "Apartment Rent"
+    assert payload["largest_expense"]["description"] == "Apartment Rent"
+    assert payload["over_budget_count"] == 1
+    assert payload["anomaly_count"] == 2
+    assert "Spending was $2,840.87" in payload["highlights"][0]
+    assert any("Housing is $250.00 over budget." == item for item in payload["risks"])
+    assert any("Review over-budget categories: Housing." == item for item in payload["next_actions"])
+
+
 def test_recurring_endpoint_detects_monthly_charges():
     client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
 
@@ -400,6 +420,23 @@ def test_ask_handles_budget_questions():
     assert payload["amount"] == 250.0
     assert payload["categories"] == ["Housing"]
     assert "Housing is $250.00 over" in payload["answer"]
+
+
+def test_ask_handles_monthly_report_questions():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    client.put("/budgets", json={"month": "2026-07", "category": "Housing", "amount": 1200})
+
+    response = client.post("/ask", json={"question": "Give me my monthly report for July 2026"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "monthly_insights"
+    assert payload["amount"] == 2840.87
+    assert payload["categories"] == ["Housing"]
+    assert payload["month"] == "2026-07"
+    assert "For 2026-07, you spent $2,840.87" in payload["answer"]
+    assert "Housing is $250.00 over budget." in payload["answer"]
+    assert payload["data"][0]["top_category"]["category"] == "Housing"
 
 
 def test_ask_handles_upload_history_questions():

@@ -679,6 +679,96 @@ def recurring_charges(limit: int = 10, min_occurrences: int = 3) -> list[dict]:
     )[:limit]
 
 
+def monthly_insights(month: str | None = None) -> dict:
+    """Compose a concise monthly report from deterministic finance signals."""
+    insight_month = month or _latest_month()
+    if insight_month is None:
+        return {
+            "month": None,
+            "summary": monthly_summary(month=None),
+            "spending_delta": None,
+            "spending_delta_percent": None,
+            "top_category": None,
+            "top_merchant": None,
+            "largest_expense": None,
+            "over_budget_count": 0,
+            "near_budget_count": 0,
+            "recurring_count": 0,
+            "anomaly_count": 0,
+            "highlights": ["No imported transactions yet."],
+            "risks": [],
+            "next_actions": ["Upload a CSV or text-based PDF statement to generate a monthly report."],
+        }
+
+    summary = monthly_summary(month=insight_month)
+    categories = category_totals(month=insight_month)
+    merchants = top_merchants(month=insight_month, limit=3)
+    expenses = largest_expenses(month=insight_month, limit=3)
+    budgets = budget_progress(insight_month)
+    recurring = recurring_charges(limit=3)
+    anomalies = detect_anomalies(limit=3, month=insight_month)
+    previous_summary = monthly_summary(month=_previous_month(insight_month))
+
+    spending_delta = None
+    spending_delta_percent = None
+    if previous_summary["transaction_count"]:
+        spending_delta = round(
+            summary["total_spending"] - previous_summary["total_spending"],
+            2,
+        )
+        if previous_summary["total_spending"]:
+            spending_delta_percent = round(
+                (spending_delta / previous_summary["total_spending"]) * 100,
+                1,
+            )
+
+    over_budgets = [item for item in budgets if item["status"] == "over"]
+    near_budgets = [item for item in budgets if item["status"] == "near"]
+    top_category = categories[0] if categories else None
+    top_merchant = merchants[0] if merchants else None
+    largest_expense = expenses[0] if expenses else None
+
+    highlights = _monthly_highlights(
+        summary=summary,
+        top_category=top_category,
+        top_merchant=top_merchant,
+        recurring=recurring,
+        spending_delta=spending_delta,
+        spending_delta_percent=spending_delta_percent,
+    )
+    risks = _monthly_risks(
+        summary=summary,
+        over_budgets=over_budgets,
+        near_budgets=near_budgets,
+        anomalies=anomalies,
+        largest_expense=largest_expense,
+    )
+    next_actions = _monthly_next_actions(
+        budgets=budgets,
+        over_budgets=over_budgets,
+        near_budgets=near_budgets,
+        anomalies=anomalies,
+        recurring=recurring,
+    )
+
+    return {
+        "month": insight_month,
+        "summary": summary,
+        "spending_delta": spending_delta,
+        "spending_delta_percent": spending_delta_percent,
+        "top_category": top_category,
+        "top_merchant": top_merchant,
+        "largest_expense": largest_expense,
+        "over_budget_count": len(over_budgets),
+        "near_budget_count": len(near_budgets),
+        "recurring_count": len(recurring),
+        "anomaly_count": len(anomalies),
+        "highlights": highlights,
+        "risks": risks,
+        "next_actions": next_actions,
+    }
+
+
 def spending_for_categories(categories: list[str], month: str | None = None) -> int:
     """Return spending cents for the requested categories."""
     if not categories:
@@ -825,6 +915,114 @@ def _recurring_cadence(gaps: list[int]) -> str | None:
     if 80 <= average_gap <= 100:
         return "quarterly"
     return None
+
+
+def _latest_month() -> str | None:
+    months = available_months()
+    return months[0]["month"] if months else None
+
+
+def _previous_month(month: str) -> str:
+    current = date.fromisoformat(f"{month}-01")
+    if current.month == 1:
+        return f"{current.year - 1}-12"
+    return f"{current.year}-{current.month - 1:02d}"
+
+
+def _monthly_highlights(
+    summary: dict,
+    top_category: dict | None,
+    top_merchant: dict | None,
+    recurring: list[dict],
+    spending_delta: float | None,
+    spending_delta_percent: float | None,
+) -> list[str]:
+    if not summary["transaction_count"]:
+        return ["No transactions were imported for this month yet."]
+
+    highlights = [
+        (
+            f"Spending was {_format_money(summary['total_spending'])} across "
+            f"{summary['transaction_count']} transactions."
+        )
+    ]
+    if top_category:
+        highlights.append(
+            f"Top category was {top_category['category']} at {_format_money(top_category['total'])}."
+        )
+    if top_merchant:
+        highlights.append(
+            f"Top merchant was {top_merchant['merchant']} at {_format_money(top_merchant['total'])}."
+        )
+    if spending_delta is not None:
+        direction = "up" if spending_delta > 0 else "down"
+        if spending_delta == 0:
+            highlights.append("Spending matched the previous month.")
+        elif spending_delta_percent is None:
+            highlights.append(f"Spending was {direction} {_format_money(abs(spending_delta))} from the previous month.")
+        else:
+            highlights.append(
+                f"Spending was {direction} {_format_money(abs(spending_delta))} "
+                f"({abs(spending_delta_percent)}%) from the previous month."
+            )
+    if recurring:
+        highlights.append(f"{len(recurring)} recurring charge{'s' if len(recurring) != 1 else ''} detected.")
+    return highlights[:5]
+
+
+def _monthly_risks(
+    summary: dict,
+    over_budgets: list[dict],
+    near_budgets: list[dict],
+    anomalies: list[dict],
+    largest_expense: dict | None,
+) -> list[str]:
+    risks = []
+    if summary["net"] < 0:
+        risks.append(f"Net cash flow was negative at {_format_money(summary['net'])}.")
+    if over_budgets:
+        largest_gap = max(over_budgets, key=lambda item: abs(item["remaining"]))
+        risks.append(
+            f"{largest_gap['category']} is {_format_money(abs(largest_gap['remaining']))} over budget."
+        )
+    if near_budgets:
+        risks.append(f"{len(near_budgets)} budget category{' is' if len(near_budgets) == 1 else 'ies are'} near the limit.")
+    if anomalies:
+        risks.append(f"{len(anomalies)} unusual charge{' was' if len(anomalies) == 1 else 's were'} flagged.")
+    if largest_expense and not risks:
+        risks.append(
+            f"Largest expense was {largest_expense['description']} at {_format_money(abs(largest_expense['amount']))}."
+        )
+    return risks[:4]
+
+
+def _monthly_next_actions(
+    budgets: list[dict],
+    over_budgets: list[dict],
+    near_budgets: list[dict],
+    anomalies: list[dict],
+    recurring: list[dict],
+) -> list[str]:
+    actions = []
+    if not budgets:
+        actions.append("Set category budgets for this month.")
+    if over_budgets:
+        categories = ", ".join(item["category"] for item in over_budgets[:2])
+        actions.append(f"Review over-budget categories: {categories}.")
+    elif near_budgets:
+        categories = ", ".join(item["category"] for item in near_budgets[:2])
+        actions.append(f"Watch near-limit budgets: {categories}.")
+    if anomalies:
+        actions.append("Review unusual charges before the next import.")
+    if recurring:
+        actions.append("Check upcoming recurring charges against next month's budget.")
+    if not actions:
+        actions.append("Keep importing statements monthly to maintain the trend line.")
+    return actions[:4]
+
+
+def _format_money(value: float) -> str:
+    return f"${value:,.2f}"
 
 
 def _month_filter(month: str | None) -> tuple[str, list[str]]:

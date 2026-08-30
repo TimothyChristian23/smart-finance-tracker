@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   BarChart3,
   BookmarkPlus,
+  ClipboardList,
   CircleDollarSign,
   Download,
   FileUp,
@@ -37,6 +38,7 @@ const DEFAULT_QUESTION = "How much did I spend on food in 2026-07?";
 export default function App() {
   const [health, setHealth] = useState("Checking");
   const [summary, setSummary] = useState(emptySummary());
+  const [insights, setInsights] = useState(emptyInsights());
   const [transactions, setTransactions] = useState([]);
   const [anomalies, setAnomalies] = useState([]);
   const [months, setMonths] = useState([]);
@@ -74,6 +76,7 @@ export default function App() {
 
       const [
         summaryPayload,
+        insightPayload,
         transactionPayload,
         anomalyPayload,
         categoryPayload,
@@ -87,6 +90,7 @@ export default function App() {
         uploadPayload,
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
+        request(`/insights/monthly${queryString({ month: activeMonth })}`),
         request(`/transactions${queryString({
           month: activeMonth,
           category: transactionFilters.category,
@@ -107,6 +111,7 @@ export default function App() {
 
       setMonths(monthsPayload);
       setSummary(summaryPayload);
+      setInsights(insightPayload);
       setTransactions(transactionPayload);
       setAnomalies(anomalyPayload);
       setCategories(categoryPayload);
@@ -357,6 +362,11 @@ export default function App() {
           </ChartFrame>
         </section>
 
+        <section className="panel insights-panel">
+          <PanelTitle icon={<ClipboardList size={18} />} title="Monthly Insights" detail={insights.month || selectedMonthLabel} />
+          <InsightList insights={insights} />
+        </section>
+
         <section className="panel budget-panel">
           <PanelTitle icon={<Target size={18} />} title="Budgets" detail={month || "No month"} />
           <BudgetForm
@@ -496,6 +506,27 @@ function MoneyList({ items, emptyText, getTitle, getSubtitle, tone = "default" }
             <span>{getSubtitle(item)}</span>
           </div>
           <b className={tone === "warn" ? "warn" : ""}>{money(Math.abs(item.amount ?? item.total ?? 0))}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InsightList({ insights }) {
+  const rows = [
+    ...(insights.highlights || []).map((text) => ({ tone: "highlight", text })),
+    ...(insights.risks || []).map((text) => ({ tone: "risk", text })),
+    ...(insights.next_actions || []).map((text) => ({ tone: "action", text })),
+  ].slice(0, 7);
+
+  if (!rows.length) return <p className="empty">No monthly insights yet.</p>;
+
+  return (
+    <div className="insight-list">
+      {rows.map((row, index) => (
+        <div className={`insight-row insight-${row.tone}`} key={`${row.tone}-${index}`}>
+          <span aria-hidden="true" />
+          <p>{row.text}</p>
         </div>
       ))}
     </div>
@@ -771,6 +802,25 @@ function emptySummary() {
     net: 0,
     transaction_count: 0,
     categories: [],
+  };
+}
+
+function emptyInsights() {
+  return {
+    month: null,
+    summary: emptySummary(),
+    spending_delta: null,
+    spending_delta_percent: null,
+    top_category: null,
+    top_merchant: null,
+    largest_expense: null,
+    over_budget_count: 0,
+    near_budget_count: 0,
+    recurring_count: 0,
+    anomaly_count: 0,
+    highlights: [],
+    risks: [],
+    next_actions: [],
   };
 }
 

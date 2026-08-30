@@ -27,6 +27,7 @@ from app.database import (
     list_merchant_rules,
     list_transactions,
     list_uploads,
+    monthly_insights,
     monthly_summary,
     monthly_trends,
     record_upload,
@@ -132,6 +133,23 @@ class SummaryResponse(BaseModel):
     net: float
     transaction_count: int
     categories: list[SummaryCategory]
+
+
+class MonthlyInsightResponse(BaseModel):
+    month: str | None
+    summary: dict
+    spending_delta: float | None = None
+    spending_delta_percent: float | None = None
+    top_category: dict | None = None
+    top_merchant: dict | None = None
+    largest_expense: dict | None = None
+    over_budget_count: int
+    near_budget_count: int
+    recurring_count: int
+    anomaly_count: int
+    highlights: list[str]
+    risks: list[str]
+    next_actions: list[str]
 
 
 class AskRequest(BaseModel):
@@ -282,6 +300,11 @@ async def summary(month: str | None = None) -> dict:
     return monthly_summary(month=validate_month(month))
 
 
+@app.get("/insights/monthly", response_model=MonthlyInsightResponse)
+async def insights(month: str | None = None) -> dict:
+    return monthly_insights(month=validate_month(month))
+
+
 @app.get("/months")
 async def months() -> list[dict]:
     return available_months()
@@ -369,6 +392,32 @@ async def ask(request: AskRequest) -> AskResponse:
             ),
             intent="upload_history",
             data=uploads,
+        )
+
+    if looks_like_monthly_report_question(normalized):
+        report_month = month or latest_imported_month()
+        report = monthly_insights(month=report_month)
+        if report["month"] is None:
+            return AskResponse(
+                answer="I do not have imported transactions yet, so I cannot build a monthly report.",
+                intent="monthly_insights",
+                data=[report],
+            )
+
+        summary_data = report["summary"]
+        risk_text = report["risks"][0] if report["risks"] else "No urgent risks were flagged."
+        highlight_text = report["highlights"][1] if len(report["highlights"]) > 1 else report["highlights"][0]
+        return AskResponse(
+            answer=(
+                f"For {format_month_label(report['month'])}, you spent "
+                f"{format_money(summary_data['total_spending'])} and net cash flow was "
+                f"{format_money(summary_data['net'])}. {highlight_text} {risk_text}"
+            ),
+            amount=summary_data["total_spending"],
+            categories=[report["top_category"]["category"]] if report["top_category"] else [],
+            month=report["month"],
+            intent="monthly_insights",
+            data=[report],
         )
 
     if has_any(normalized, ["budget", "budgets"]):
@@ -561,7 +610,8 @@ async def ask(request: AskRequest) -> AskResponse:
         return AskResponse(
             answer=(
                 "I can answer spending, income, net cash flow, category, merchant, "
-                "budget, recurring charge, upload history, largest expense, and anomaly questions."
+                "budget, recurring charge, upload history, monthly report, largest expense, "
+                "and anomaly questions."
             ),
             month=month,
         )
@@ -843,6 +893,13 @@ def looks_like_upload_history_question(question: str) -> bool:
     return (
         has_any(question, ["upload", "uploaded", "import", "imported", "statement", "statements", "file", "files"])
         and has_any(question, ["history", "recent", "latest", "which", "what", "show", "list"])
+    )
+
+
+def looks_like_monthly_report_question(question: str) -> bool:
+    return (
+        has_any(question, ["report", "insight", "insights", "overview", "checkup", "recap"])
+        and has_any(question, ["month", "monthly", "spending", "finance", "financial"])
     )
 
 

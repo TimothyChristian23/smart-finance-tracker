@@ -17,9 +17,10 @@ The first implementation slice focuses on trustworthy analytics:
 - Recurring charge and subscription detection
 - Transaction search, category filtering, and CSV export
 - Monthly spending summaries
+- Monthly insight reports with highlights, risks, and next actions
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection
-- Deterministic question answering for spending, income, category, merchant, budget, recurring charge, largest expense, and anomaly questions
+- Deterministic question answering for spending, income, category, merchant, budget, recurring charge, monthly report, largest expense, and anomaly questions
 - React dashboard scaffold
 - Locked frontend dependency install and production build
 - GitHub Actions backend test and frontend build workflows
@@ -107,6 +108,7 @@ Useful API endpoints:
 
 ```text
 GET  /summary?month=2026-07
+GET  /insights/monthly?month=2026-07
 GET  /months
 GET  /uploads
 GET  /transactions?month=2026-07&category=Dining&search=coffee
@@ -138,6 +140,10 @@ Statements that are scanned images will need OCR support before they can be impo
 Recurring charge detection needs the same merchant to appear across multiple months,
 so it becomes useful after importing a few statements. Upload
 `data/sample_recurring_transactions.csv` if you want demo recurring charges right away.
+
+Monthly insight reports combine summary totals, budget progress, recurring charges,
+top merchants, largest expenses, and anomalies into a deterministic snapshot. Ask
+`Give me my monthly report for July 2026` to route the Q&A panel to that same report.
 
 ## Notes
 

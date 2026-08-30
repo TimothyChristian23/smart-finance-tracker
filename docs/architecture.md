@@ -10,9 +10,9 @@ AI-ready product surface.
 3. Transactions are normalized into SQLite with cent-based amounts, and each successful upload is logged with imported and duplicate counts.
 4. Starter categorization rules assign categories from merchant descriptions.
 5. Users can correct transaction categories, save exact merchant rules for future imports, and set monthly category budgets.
-6. Dashboard endpoints return searchable transactions, upload history, monthly category summaries, budgets, recurring charges, merchants, trends, largest expenses, anomalies, and saved rules.
-7. The question endpoint routes common finance questions to exact SQL-backed totals and rankings.
-8. The React frontend uploads statements and displays import history, summaries, budget progress, recurring charges, anomalies, editable categories, saved rules, filtered transactions, CSV export, and a finance Q&A panel.
+6. Dashboard endpoints return searchable transactions, upload history, monthly category summaries, monthly insight reports, budgets, recurring charges, merchants, trends, largest expenses, anomalies, and saved rules.
+7. The question endpoint routes common finance questions to exact SQL-backed totals, rankings, and monthly reports.
+8. The React frontend uploads statements and displays import history, summaries, monthly insights, budget progress, recurring charges, anomalies, editable categories, saved rules, filtered transactions, CSV export, and a finance Q&A panel.
 
 ## Trust Boundary
 
