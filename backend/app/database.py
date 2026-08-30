@@ -411,17 +411,24 @@ def list_uploads(limit: int = 20) -> list[dict]:
     return [_upload_row_to_dict(row) for row in rows]
 
 
-def list_transactions(limit: int = 200) -> list[dict]:
-    """Return recent transactions."""
+def list_transactions(
+    limit: int = 200,
+    month: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+) -> list[dict]:
+    """Return transactions with optional month, category, and description filters."""
+    where_sql, params = _transaction_filter(month=month, category=category, search=search)
     with connect() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT id, transaction_date, description, amount_cents, category, source_file
             FROM transactions
+            {where_sql}
             ORDER BY transaction_date DESC, id DESC
             LIMIT ?
             """,
-            (limit,),
+            [*params, limit],
         ).fetchall()
     return [_transaction_row_to_dict(row) for row in rows]
 
@@ -834,3 +841,27 @@ def _month_filter(month: str | None) -> tuple[str, list[str]]:
         "WHERE transaction_date >= ? AND transaction_date < ?",
         [start.isoformat(), end.isoformat()],
     )
+
+
+def _transaction_filter(
+    month: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+) -> tuple[str, list[str]]:
+    clauses = []
+    params = []
+
+    if month:
+        _where_sql, month_params = _month_filter(month)
+        clauses.append("transaction_date >= ? AND transaction_date < ?")
+        params.extend(month_params)
+    if category:
+        clauses.append("category = ?")
+        params.append(category)
+    if search:
+        clauses.append("lower(description) LIKE ?")
+        params.append(f"%{search.strip().lower()}%")
+
+    if not clauses:
+        return "", []
+    return f"WHERE {' AND '.join(clauses)}", params

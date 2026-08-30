@@ -112,6 +112,7 @@ h2 {
 .category-select,
 .budget-form select,
 .budget-form input,
+.transaction-toolbar select,
 .upload-form input,
 .ask-form textarea {
   border: 1px solid var(--line);
@@ -130,6 +131,7 @@ h2 {
 .category-select:focus,
 .budget-form select:focus,
 .budget-form input:focus,
+.transaction-toolbar select:focus,
 .upload-form input:focus,
 .ask-form textarea:focus {
   border-color: var(--accent);
@@ -465,6 +467,55 @@ h2 {
   margin-top: 16px;
 }
 
+.transaction-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 190px 40px auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.transaction-filter {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  padding: 0 10px;
+}
+
+.transaction-filter:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(36, 120, 106, 0.16);
+}
+
+.transaction-filter input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  outline: 0;
+}
+
+.transaction-toolbar select {
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px;
+}
+
+.filter-reset {
+  width: 40px;
+  padding: 0;
+}
+
+.export-button {
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
 .transaction-table {
   display: grid;
   grid-template-columns: 120px minmax(220px, 1fr) 230px 120px;
@@ -600,6 +651,14 @@ h2 {
 
   .budget-form {
     grid-template-columns: 1fr;
+  }
+
+  .transaction-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-reset {
+    width: 100%;
   }
 
   .transaction-table {

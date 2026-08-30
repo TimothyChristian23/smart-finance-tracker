@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO, StringIO
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
@@ -206,8 +206,44 @@ async def upload_transactions(file: UploadFile = File(...)) -> UploadResponse:
 
 
 @app.get("/transactions", response_model=list[TransactionResponse])
-async def transactions(limit: int = 200) -> list[dict]:
-    return list_transactions(limit=limit)
+async def transactions(
+    limit: int = 200,
+    month: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+) -> list[dict]:
+    return filtered_transactions(limit=limit, month=month, category=category, search=search)
+
+
+@app.get("/transactions/export")
+async def export_transactions(
+    limit: int = 5000,
+    month: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+) -> Response:
+    rows = filtered_transactions(limit=limit, month=month, category=category, search=search, maximum=5000)
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=["date", "description", "category", "amount", "source_file"],
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({
+            "date": row["date"],
+            "description": row["description"],
+            "category": row["category"],
+            "amount": f"{row['amount']:.2f}",
+            "source_file": row["source_file"] or "",
+        })
+
+    filename = f"transactions-{month or 'all'}.csv"
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/uploads", response_model=list[UploadHistoryResponse])
@@ -751,6 +787,33 @@ def validate_category(category: str) -> str:
 
 def bounded_limit(limit: int, maximum: int = 100) -> int:
     return max(1, min(limit, maximum))
+
+
+def filtered_transactions(
+    limit: int = 200,
+    month: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+    maximum: int = 200,
+) -> list[dict]:
+    return list_transactions(
+        limit=bounded_limit(limit, maximum=maximum),
+        month=validate_month(month),
+        category=validate_category(category) if category else None,
+        search=validate_search(search),
+    )
+
+
+def validate_search(search: str | None) -> str | None:
+    if search is None:
+        return None
+
+    normalized = " ".join(search.split())
+    if not normalized:
+        return None
+    if len(normalized) > 120:
+        raise HTTPException(status_code=400, detail="search must be 120 characters or fewer.")
+    return normalized
 
 
 def latest_imported_month() -> str | None:

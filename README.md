@@ -15,6 +15,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Saved merchant rules that apply to future imports
 - Monthly category budgets with live progress
 - Recurring charge and subscription detection
+- Transaction search, category filtering, and CSV export
 - Monthly spending summaries
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection
@@ -108,6 +109,8 @@ Useful API endpoints:
 GET  /summary?month=2026-07
 GET  /months
 GET  /uploads
+GET  /transactions?month=2026-07&category=Dining&search=coffee
+GET  /transactions/export?month=2026-07
 GET  /categories?month=2026-07
 GET  /category-options
 GET  /budgets?month=2026-07

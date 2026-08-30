@@ -106,6 +106,52 @@ def test_upload_history_records_import_counts_and_duplicates():
     assert uploads[1]["duplicates_skipped"] == 0
 
 
+def test_transactions_filter_by_month_category_and_search():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.get(
+        "/transactions",
+        params={
+            "month": "2026-07",
+            "category": "Food & Grocery",
+            "search": "whole",
+            "limit": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["description"] for item in payload] == [
+        "Whole Foods Market",
+        "Whole Foods Market",
+    ]
+    assert {item["category"] for item in payload} == {"Food & Grocery"}
+
+    rejected = client.get("/transactions", params={"category": "Mystery"})
+    assert rejected.status_code == 400
+    assert "category must be one of" in rejected.json()["detail"]
+
+
+def test_transaction_export_matches_filters():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.get(
+        "/transactions/export",
+        params={
+            "month": "2026-07",
+            "category": "Dining",
+            "search": "coffee",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert response.headers["content-disposition"] == 'attachment; filename="transactions-2026-07.csv"'
+    assert response.text.splitlines()[0] == "date,description,category,amount,source_file"
+    assert "2026-07-05,Blue Bottle Coffee,Dining,-6.75,sample.csv" in response.text
+    assert "Chipotle" not in response.text
+
+
 def test_update_transaction_category_recalculates_summary():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = next(

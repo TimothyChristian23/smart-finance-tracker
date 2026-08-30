@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookmarkPlus,
   CircleDollarSign,
+  Download,
   FileUp,
   History,
   MessageSquare,
@@ -11,10 +12,12 @@ import {
   ReceiptText,
   Repeat2,
   RefreshCw,
+  Search,
   Store,
   Target,
   Trash2,
   TrendingUp,
+  X,
 } from "lucide-react";
 import {
   Bar,
@@ -47,6 +50,7 @@ export default function App() {
   const [recurringCharges, setRecurringCharges] = useState([]);
   const [uploads, setUploads] = useState([]);
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
+  const [transactionFilters, setTransactionFilters] = useState({ category: "", search: "" });
   const [month, setMonth] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
@@ -83,7 +87,12 @@ export default function App() {
         uploadPayload,
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
-        request("/transactions?limit=12"),
+        request(`/transactions${queryString({
+          month: activeMonth,
+          category: transactionFilters.category,
+          search: transactionFilters.search,
+          limit: 50,
+        })}`),
         request(`/anomalies${queryString({ month: activeMonth, limit: 6 })}`),
         request(`/categories${queryString({ month: activeMonth })}`),
         request("/trends?limit=12"),
@@ -114,7 +123,7 @@ export default function App() {
       setHealth("Offline");
       setUploadStatus(error.message);
     }
-  }, [month]);
+  }, [month, transactionFilters]);
 
   useEffect(() => {
     refreshDashboard();
@@ -265,7 +274,25 @@ export default function App() {
     }
   }
 
-  const recentTransactions = useMemo(() => transactions.slice(0, 10), [transactions]);
+  function handleTransactionFilterChange(name, value) {
+    setTransactionFilters((current) => ({ ...current, [name]: value }));
+  }
+
+  function handleClearTransactionFilters() {
+    setTransactionFilters({ category: "", search: "" });
+  }
+
+  function handleExportTransactions() {
+    const params = queryString({
+      month,
+      category: transactionFilters.category,
+      search: transactionFilters.search,
+      limit: 5000,
+    });
+    window.location.assign(`${API_BASE}/transactions/export${params}`);
+  }
+
+  const visibleTransactions = useMemo(() => transactions.slice(0, 20), [transactions]);
   const trendDomain = useMemo(() => [0, "auto"], []);
 
   return (
@@ -398,13 +425,25 @@ export default function App() {
       </section>
 
       <section className="panel transactions-panel">
-        <PanelTitle icon={<CircleDollarSign size={18} />} title="Recent Transactions" detail={`${recentTransactions.length} shown`} />
+        <PanelTitle
+          icon={<CircleDollarSign size={18} />}
+          title="Transactions"
+          detail={`${visibleTransactions.length}${transactions.length > visibleTransactions.length ? ` of ${transactions.length}` : ""} shown`}
+        />
+        <TransactionFilters
+          categoryOptions={categoryOptions}
+          filters={transactionFilters}
+          onChange={handleTransactionFilterChange}
+          onClear={handleClearTransactionFilters}
+          onExport={handleExportTransactions}
+          total={transactions.length}
+        />
         <div className="transaction-table">
           <div className="table-heading">Date</div>
           <div className="table-heading">Description</div>
           <div className="table-heading">Category</div>
           <div className="table-heading align-right">Amount</div>
-          {recentTransactions.map((transaction) => (
+          {visibleTransactions.map((transaction) => (
             <TransactionRow
               categoryOptions={categoryOptions}
               key={transaction.id}
@@ -414,7 +453,7 @@ export default function App() {
             />
           ))}
         </div>
-        {!recentTransactions.length && <p className="empty">No transactions imported.</p>}
+        {!visibleTransactions.length && <p className="empty">No matching transactions.</p>}
       </section>
     </main>
   );
@@ -614,6 +653,45 @@ function AnswerCard({ answer }) {
       <strong>{answer.answer}</strong>
       {!!answer.categories?.length && <span>{answer.categories.join(" + ")}</span>}
       {!!answer.data?.length && <small>{answer.data.length} supporting result{answer.data.length === 1 ? "" : "s"}</small>}
+    </div>
+  );
+}
+
+function TransactionFilters({ categoryOptions, filters, onChange, onClear, onExport, total }) {
+  return (
+    <div className="transaction-toolbar">
+      <label className="transaction-filter">
+        <Search size={16} />
+        <input
+          aria-label="Search transactions"
+          onChange={(event) => onChange("search", event.target.value)}
+          placeholder="Search merchant"
+          value={filters.search}
+        />
+      </label>
+      <select
+        aria-label="Filter transactions by category"
+        onChange={(event) => onChange("category", event.target.value)}
+        value={filters.category}
+      >
+        <option value="">All categories</option>
+        {categoryOptions.map((category) => (
+          <option key={category} value={category}>{category}</option>
+        ))}
+      </select>
+      <button
+        aria-label="Clear transaction filters"
+        className="ghost-button filter-reset"
+        onClick={onClear}
+        title="Clear filters"
+        type="button"
+      >
+        <X size={16} />
+      </button>
+      <button className="ghost-button export-button" disabled={!total} onClick={onExport} type="button">
+        <Download size={16} />
+        Export CSV
+      </button>
     </div>
   );
 }
