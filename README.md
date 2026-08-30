@@ -47,6 +47,7 @@ smart-finance-tracker/
 |   |-- package-lock.json
 |   `-- package.json
 |-- data/
+|   |-- sample_recurring_transactions.csv
 |   `-- sample_transactions.csv
 |-- docs/
 |   `-- architecture.md
@@ -130,7 +131,8 @@ PDF uploads are supported when the statement exposes selectable text with rows l
 Statements that are scanned images will need OCR support before they can be imported.
 
 Recurring charge detection needs the same merchant to appear across multiple months,
-so it becomes useful after importing a few statements.
+so it becomes useful after importing a few statements. Upload
+`data/sample_recurring_transactions.csv` if you want demo recurring charges right away.
 
 ## Notes
 
