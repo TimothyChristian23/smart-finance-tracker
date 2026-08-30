@@ -28,6 +28,7 @@ from app.database import (
     list_transactions,
     monthly_summary,
     monthly_trends,
+    recurring_charges,
     reset_db,
     spending_for_categories,
     top_merchants,
@@ -90,6 +91,19 @@ class BudgetResponse(BaseModel):
     percent_used: float
     status: str
     updated_at: str
+
+
+class RecurringChargeResponse(BaseModel):
+    merchant: str
+    category: str
+    average_amount: float
+    total_amount: float
+    occurrences: int
+    first_seen: str
+    last_seen: str
+    next_expected_date: str
+    cadence: str
+    confidence: float
 
 
 class SummaryCategory(BaseModel):
@@ -267,6 +281,11 @@ async def largest(month: str | None = None, limit: int = 10) -> list[dict]:
     return largest_expenses(month=validate_month(month), limit=bounded_limit(limit))
 
 
+@app.get("/recurring", response_model=list[RecurringChargeResponse])
+async def recurring(limit: int = 10) -> list[dict]:
+    return recurring_charges(limit=bounded_limit(limit))
+
+
 @app.post("/ask", response_model=AskResponse)
 async def ask(request: AskRequest) -> AskResponse:
     """Answer a simple spending question from structured transaction data."""
@@ -318,6 +337,28 @@ async def ask(request: AskRequest) -> AskResponse:
             month=budget_month,
             intent="budgets",
             data=budget_items,
+        )
+
+    if has_any(normalized, ["recurring", "subscription", "subscriptions", "repeat", "repeating"]):
+        charges = recurring_charges(limit=5)
+        if not charges:
+            return AskResponse(
+                answer="I did not find recurring charges yet. I need the same merchant across multiple months.",
+                intent="recurring_charges",
+            )
+
+        lead = charges[0]
+        return AskResponse(
+            answer=(
+                f"I found {len(charges)} likely recurring charge"
+                f"{'' if len(charges) == 1 else 's'}. "
+                f"The clearest match is {lead['merchant']} at about "
+                f"{format_money(lead['average_amount'])} {lead['cadence']}."
+            ),
+            amount=lead["average_amount"],
+            categories=[item["category"] for item in charges],
+            intent="recurring_charges",
+            data=charges,
         )
 
     if has_any(normalized, ["anomaly", "anomalies", "unusual", "weird", "outlier"]):
@@ -443,7 +484,7 @@ async def ask(request: AskRequest) -> AskResponse:
         return AskResponse(
             answer=(
                 "I can answer spending, income, net cash flow, category, merchant, "
-                "largest expense, and anomaly questions."
+                "budget, recurring charge, largest expense, and anomaly questions."
             ),
             month=month,
         )

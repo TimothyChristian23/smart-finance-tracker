@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -535,6 +535,69 @@ def largest_expenses(month: str | None = None, limit: int = 10) -> list[dict]:
     return [_transaction_row_to_dict(row) for row in rows]
 
 
+def recurring_charges(limit: int = 10, min_occurrences: int = 3) -> list[dict]:
+    """Detect likely recurring expenses from repeated merchant descriptions."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT transaction_date, description, amount_cents, category
+            FROM transactions
+            WHERE amount_cents < 0
+            ORDER BY lower(trim(description)), transaction_date
+            """
+        ).fetchall()
+
+    grouped: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        grouped.setdefault(normalize_text(row["description"]), []).append(row)
+
+    charges = []
+    for items in grouped.values():
+        if len(items) < min_occurrences:
+            continue
+
+        months = {item["transaction_date"][:7] for item in items}
+        if len(months) < min_occurrences:
+            continue
+
+        parsed_dates = [date.fromisoformat(item["transaction_date"]) for item in items]
+        gaps = [
+            (parsed_dates[index] - parsed_dates[index - 1]).days
+            for index in range(1, len(parsed_dates))
+        ]
+        cadence = _recurring_cadence(gaps)
+        if cadence is None:
+            continue
+
+        amounts = [abs(int(item["amount_cents"])) for item in items]
+        average_cents = int((sum(amounts) / len(amounts)) + 0.5)
+        total_cents = sum(amounts)
+        max_difference = max(abs(amount - average_cents) for amount in amounts)
+        stability = 1 - min(1, max_difference / max(average_cents, 1))
+        confidence = round(min(0.99, 0.6 + (stability * 0.35)), 2)
+        expected_gap = int((sum(gaps) / len(gaps)) + 0.5) if gaps else 30
+        next_expected_date = (parsed_dates[-1] + timedelta(days=expected_gap)).isoformat()
+
+        charges.append({
+            "merchant": items[-1]["description"],
+            "category": items[-1]["category"],
+            "average_amount": cents_to_dollars(average_cents),
+            "total_amount": cents_to_dollars(total_cents),
+            "occurrences": len(items),
+            "first_seen": parsed_dates[0].isoformat(),
+            "last_seen": parsed_dates[-1].isoformat(),
+            "next_expected_date": next_expected_date,
+            "cadence": cadence,
+            "confidence": confidence,
+        })
+
+    return sorted(
+        charges,
+        key=lambda item: (item["confidence"], item["average_amount"], item["occurrences"]),
+        reverse=True,
+    )[:limit]
+
+
 def spending_for_categories(categories: list[str], month: str | None = None) -> int:
     """Return spending cents for the requested categories."""
     if not categories:
@@ -648,6 +711,25 @@ def _budget_row_to_dict(row: sqlite3.Row, spent_cents: int) -> dict:
         "status": status,
         "updated_at": row["updated_at"],
     }
+
+
+def _recurring_cadence(gaps: list[int]) -> str | None:
+    if not gaps:
+        return None
+
+    average_gap = sum(gaps) / len(gaps)
+    max_gap_variance = max(abs(gap - average_gap) for gap in gaps)
+    if max_gap_variance > 8:
+        return None
+    if 6 <= average_gap <= 8:
+        return "weekly"
+    if 12 <= average_gap <= 16:
+        return "biweekly"
+    if 25 <= average_gap <= 35:
+        return "monthly"
+    if 80 <= average_gap <= 100:
+        return "quarterly"
+    return None
 
 
 def _month_filter(month: str | None) -> tuple[str, list[str]]:

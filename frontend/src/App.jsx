@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Plus,
   ReceiptText,
+  Repeat2,
   RefreshCw,
   Store,
   Target,
@@ -42,6 +43,7 @@ export default function App() {
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [merchantRules, setMerchantRules] = useState([]);
   const [budgets, setBudgets] = useState([]);
+  const [recurringCharges, setRecurringCharges] = useState([]);
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
   const [month, setMonth] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
@@ -75,6 +77,7 @@ export default function App() {
         categoryOptionsPayload,
         merchantRulesPayload,
         budgetPayload,
+        recurringPayload,
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
         request("/transactions?limit=12"),
@@ -86,6 +89,7 @@ export default function App() {
         request("/category-options"),
         request("/merchant-rules"),
         request(`/budgets${queryString({ month: activeMonth })}`),
+        request("/recurring?limit=6"),
       ]);
 
       setMonths(monthsPayload);
@@ -99,6 +103,7 @@ export default function App() {
       setCategoryOptions(categoryOptionsPayload);
       setMerchantRules(merchantRulesPayload);
       setBudgets(budgetPayload);
+      setRecurringCharges(recurringPayload);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
     } catch (error) {
       setHealth("Offline");
@@ -332,6 +337,11 @@ export default function App() {
           <BudgetList budgets={budgets} busy={busy} onDelete={handleDeleteBudget} />
         </section>
 
+        <section className="panel recurring-panel">
+          <PanelTitle icon={<Repeat2 size={18} />} title="Recurring Charges" detail={`${recurringCharges.length} detected`} />
+          <RecurringList charges={recurringCharges} />
+        </section>
+
         <section className="panel action-panel">
           <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV/PDF" />
           <form className="upload-form" onSubmit={handleUpload}>
@@ -517,6 +527,26 @@ function BudgetRow({ budget, busy, onDelete }) {
       >
         <Trash2 size={15} />
       </button>
+    </div>
+  );
+}
+
+function RecurringList({ charges }) {
+  if (!charges.length) return <p className="empty">No recurring charges detected yet.</p>;
+
+  return (
+    <div className="list">
+      {charges.map((charge) => (
+        <div className="list-row" key={`${charge.merchant}-${charge.first_seen}`}>
+          <div>
+            <strong>{charge.merchant}</strong>
+            <span>
+              {charge.cadence} | {charge.occurrences} charges | next {charge.next_expected_date}
+            </span>
+          </div>
+          <b>{money(charge.average_amount)}</b>
+        </div>
+      ))}
     </div>
   );
 }

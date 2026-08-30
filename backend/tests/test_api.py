@@ -21,6 +21,16 @@ SAMPLE_CSV = """date,description,amount
 2026-07-29,One-Time Electronics Store,-899.00
 """
 
+RECURRING_CSV = """date,description,amount
+2026-05-03,Netflix Subscription,-15.99
+2026-06-03,Netflix Subscription,-15.99
+2026-07-03,Netflix Subscription,-15.99
+2026-05-15,Gym Membership,-44.00
+2026-06-15,Gym Membership,-44.00
+2026-07-15,Gym Membership,-46.00
+2026-07-20,Random Shop,-20.00
+"""
+
 
 @pytest.fixture(autouse=True)
 def isolated_db(monkeypatch, tmp_path):
@@ -267,6 +277,26 @@ def test_budget_api_rejects_unknown_category():
     assert "category must be one of" in response.json()["detail"]
 
 
+def test_recurring_endpoint_detects_monthly_charges():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    response = client.get("/recurring")
+
+    assert response.status_code == 200
+    payload = response.json()
+    merchants = {item["merchant"]: item for item in payload}
+    assert set(merchants) == {"Gym Membership", "Netflix Subscription"}
+
+    netflix = merchants["Netflix Subscription"]
+    assert netflix["average_amount"] == 15.99
+    assert netflix["total_amount"] == 47.97
+    assert netflix["occurrences"] == 3
+    assert netflix["cadence"] == "monthly"
+    assert netflix["first_seen"] == "2026-05-03"
+    assert netflix["last_seen"] == "2026-07-03"
+    assert netflix["next_expected_date"] == "2026-08-03"
+
+
 def test_ask_handles_spending_income_and_ranking_questions():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
 
@@ -304,6 +334,19 @@ def test_ask_handles_budget_questions():
     assert payload["amount"] == 250.0
     assert payload["categories"] == ["Housing"]
     assert "Housing is $250.00 over" in payload["answer"]
+
+
+def test_ask_handles_recurring_charge_questions():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    response = client.post("/ask", json={"question": "What subscriptions do I have?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "recurring_charges"
+    assert payload["amount"] == 15.99
+    assert "Netflix Subscription" in payload["answer"]
+    assert len(payload["data"]) == 2
 
 
 def test_parse_transactions_csv_supports_debit_credit_columns():
