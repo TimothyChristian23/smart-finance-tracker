@@ -5,6 +5,7 @@ import {
   BookmarkPlus,
   CircleDollarSign,
   FileUp,
+  History,
   MessageSquare,
   Plus,
   ReceiptText,
@@ -44,6 +45,7 @@ export default function App() {
   const [merchantRules, setMerchantRules] = useState([]);
   const [budgets, setBudgets] = useState([]);
   const [recurringCharges, setRecurringCharges] = useState([]);
+  const [uploads, setUploads] = useState([]);
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
   const [month, setMonth] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
@@ -78,6 +80,7 @@ export default function App() {
         merchantRulesPayload,
         budgetPayload,
         recurringPayload,
+        uploadPayload,
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
         request("/transactions?limit=12"),
@@ -90,6 +93,7 @@ export default function App() {
         request("/merchant-rules"),
         request(`/budgets${queryString({ month: activeMonth })}`),
         request("/recurring?limit=6"),
+        request("/uploads?limit=6"),
       ]);
 
       setMonths(monthsPayload);
@@ -104,6 +108,7 @@ export default function App() {
       setMerchantRules(merchantRulesPayload);
       setBudgets(budgetPayload);
       setRecurringCharges(recurringPayload);
+      setUploads(uploadPayload);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
     } catch (error) {
       setHealth("Offline");
@@ -357,6 +362,11 @@ export default function App() {
           {uploadStatus && <p className="helper-text">{uploadStatus}</p>}
         </section>
 
+        <section className="panel uploads-panel">
+          <PanelTitle icon={<History size={18} />} title="Import History" detail={`${uploads.length} recent`} />
+          <UploadHistoryList uploads={uploads} />
+        </section>
+
         <section className="panel ask-panel">
           <PanelTitle icon={<MessageSquare size={18} />} title="Ask About Spending" detail={selectedMonthLabel} />
           <form className="ask-form" onSubmit={handleAsk}>
@@ -551,6 +561,26 @@ function RecurringList({ charges }) {
   );
 }
 
+function UploadHistoryList({ uploads }) {
+  if (!uploads.length) return <p className="empty">No statement uploads yet.</p>;
+
+  return (
+    <div className="list">
+      {uploads.map((upload) => (
+        <div className="list-row" key={upload.id}>
+          <div>
+            <strong>{upload.filename}</strong>
+            <span>
+              {upload.file_type.toUpperCase()} | {dateRange(upload)} | {upload.duplicates_skipped} skipped
+            </span>
+          </div>
+          <b>{upload.imported_count}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function RuleList({ rules, busy, onDelete }) {
   if (!rules.length) return <p className="empty">No saved merchant rules.</p>;
 
@@ -671,4 +701,14 @@ function money(value) {
     style: "currency",
     currency: "USD",
   }).format(Number(value) || 0);
+}
+
+function dateRange(upload) {
+  if (!upload.first_transaction_date || !upload.last_transaction_date) {
+    return "No dates";
+  }
+  if (upload.first_transaction_date === upload.last_transaction_date) {
+    return upload.first_transaction_date;
+  }
+  return `${upload.first_transaction_date} to ${upload.last_transaction_date}`;
 }

@@ -86,13 +86,29 @@ def init_db(conn: sqlite3.Connection) -> None:
         ON budgets (month)
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS upload_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            parsed_count INTEGER NOT NULL,
+            imported_count INTEGER NOT NULL,
+            duplicates_skipped INTEGER NOT NULL,
+            first_transaction_date TEXT,
+            last_transaction_date TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     conn.commit()
 
 
 def reset_db() -> None:
-    """Delete all stored transactions."""
+    """Delete imported transaction data."""
     with connect() as conn:
         conn.execute("DELETE FROM transactions")
+        conn.execute("DELETE FROM upload_history")
         conn.commit()
 
 
@@ -132,6 +148,47 @@ def insert_transactions(rows: list[dict]) -> dict:
             result["inserted"] += 1
         conn.commit()
     return result
+
+
+def record_upload(filename: str, file_type: str, rows: list[dict], result: dict) -> dict:
+    """Record a successful statement upload."""
+    dates = sorted(row["date"] for row in rows if row.get("date"))
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO upload_history (
+                filename,
+                file_type,
+                parsed_count,
+                imported_count,
+                duplicates_skipped,
+                first_transaction_date,
+                last_transaction_date
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                filename,
+                file_type,
+                len(rows),
+                result["inserted"],
+                result["skipped"],
+                dates[0] if dates else None,
+                dates[-1] if dates else None,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT id, filename, file_type, parsed_count, imported_count,
+                   duplicates_skipped, first_transaction_date, last_transaction_date,
+                   created_at
+            FROM upload_history
+            WHERE id = ?
+            """,
+            (cursor.lastrowid,),
+        ).fetchone()
+    return _upload_row_to_dict(row)
 
 
 def transaction_exists(conn: sqlite3.Connection, values: tuple) -> bool:
@@ -335,6 +392,23 @@ def delete_budget(budget_id: int) -> bool:
         )
         conn.commit()
     return cursor.rowcount > 0
+
+
+def list_uploads(limit: int = 20) -> list[dict]:
+    """Return recent statement upload history."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, filename, file_type, parsed_count, imported_count,
+                   duplicates_skipped, first_transaction_date, last_transaction_date,
+                   created_at
+            FROM upload_history
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [_upload_row_to_dict(row) for row in rows]
 
 
 def list_transactions(limit: int = 200) -> list[dict]:
@@ -710,6 +784,20 @@ def _budget_row_to_dict(row: sqlite3.Row, spent_cents: int) -> dict:
         "percent_used": percent_used,
         "status": status,
         "updated_at": row["updated_at"],
+    }
+
+
+def _upload_row_to_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "filename": row["filename"],
+        "file_type": row["file_type"],
+        "parsed_count": row["parsed_count"],
+        "imported_count": row["imported_count"],
+        "duplicates_skipped": row["duplicates_skipped"],
+        "first_transaction_date": row["first_transaction_date"],
+        "last_transaction_date": row["last_transaction_date"],
+        "created_at": row["created_at"],
     }
 
 

@@ -7,12 +7,12 @@ AI-ready product surface.
 
 1. A user uploads a CSV bank statement or text-based PDF statement.
 2. The backend parses common CSV columns or extracts transaction-like rows from PDF text.
-3. Transactions are normalized into SQLite with cent-based amounts.
+3. Transactions are normalized into SQLite with cent-based amounts, and each successful upload is logged with imported and duplicate counts.
 4. Starter categorization rules assign categories from merchant descriptions.
 5. Users can correct transaction categories, save exact merchant rules for future imports, and set monthly category budgets.
-6. Dashboard endpoints return recent transactions, monthly category summaries, budgets, recurring charges, merchants, trends, largest expenses, anomalies, and saved rules.
+6. Dashboard endpoints return recent transactions, upload history, monthly category summaries, budgets, recurring charges, merchants, trends, largest expenses, anomalies, and saved rules.
 7. The question endpoint routes common finance questions to exact SQL-backed totals and rankings.
-8. The React frontend uploads statements and displays summaries, budget progress, recurring charges, anomalies, editable categories, saved rules, and a finance Q&A panel.
+8. The React frontend uploads statements and displays import history, summaries, budget progress, recurring charges, anomalies, editable categories, saved rules, and a finance Q&A panel.
 
 ## Trust Boundary
 

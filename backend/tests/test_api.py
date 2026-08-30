@@ -86,6 +86,26 @@ def test_duplicate_upload_skips_existing_transactions():
     assert summary["total_spending"] == 2840.87
 
 
+def test_upload_history_records_import_counts_and_duplicates():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.get("/uploads")
+
+    assert response.status_code == 200
+    uploads = response.json()
+    assert len(uploads) == 2
+    assert uploads[0]["filename"] == "sample.csv"
+    assert uploads[0]["file_type"] == "csv"
+    assert uploads[0]["parsed_count"] == 11
+    assert uploads[0]["imported_count"] == 0
+    assert uploads[0]["duplicates_skipped"] == 11
+    assert uploads[0]["first_transaction_date"] == "2026-07-01"
+    assert uploads[0]["last_transaction_date"] == "2026-07-29"
+    assert uploads[1]["imported_count"] == 11
+    assert uploads[1]["duplicates_skipped"] == 0
+
+
 def test_update_transaction_category_recalculates_summary():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = next(
@@ -334,6 +354,18 @@ def test_ask_handles_budget_questions():
     assert payload["amount"] == 250.0
     assert payload["categories"] == ["Housing"]
     assert "Housing is $250.00 over" in payload["answer"]
+
+
+def test_ask_handles_upload_history_questions():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.post("/ask", json={"question": "What files have I uploaded?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "upload_history"
+    assert payload["data"][0]["filename"] == "sample.csv"
+    assert "sample.csv" in payload["answer"]
 
 
 def test_ask_handles_recurring_charge_questions():

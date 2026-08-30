@@ -8,6 +8,7 @@ The first implementation slice focuses on trustworthy analytics:
 
 - CSV transaction upload
 - Text-based PDF statement upload
+- Upload history with imported and duplicate counts
 - SQLite transaction storage
 - Rule-based starter categorization
 - Editable transaction categories
@@ -106,6 +107,7 @@ Useful API endpoints:
 ```text
 GET  /summary?month=2026-07
 GET  /months
+GET  /uploads
 GET  /categories?month=2026-07
 GET  /category-options
 GET  /budgets?month=2026-07

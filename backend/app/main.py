@@ -26,8 +26,10 @@ from app.database import (
     largest_expenses,
     list_merchant_rules,
     list_transactions,
+    list_uploads,
     monthly_summary,
     monthly_trends,
+    record_upload,
     recurring_charges,
     reset_db,
     spending_for_categories,
@@ -51,6 +53,18 @@ class UploadResponse(BaseModel):
     filename: str
     imported: int
     duplicates_skipped: int = 0
+
+
+class UploadHistoryResponse(BaseModel):
+    id: int
+    filename: str
+    file_type: str
+    parsed_count: int
+    imported_count: int
+    duplicates_skipped: int
+    first_transaction_date: str | None = None
+    last_transaction_date: str | None = None
+    created_at: str
 
 
 class TransactionResponse(BaseModel):
@@ -183,6 +197,7 @@ async def upload_transactions(file: UploadFile = File(...)) -> UploadResponse:
         raise HTTPException(status_code=400, detail="Only CSV or text-based PDF uploads are supported.")
 
     result = insert_transactions(rows)
+    record_upload(filename, suffix.lstrip("."), rows, result)
     return UploadResponse(
         filename=filename,
         imported=result["inserted"],
@@ -193,6 +208,11 @@ async def upload_transactions(file: UploadFile = File(...)) -> UploadResponse:
 @app.get("/transactions", response_model=list[TransactionResponse])
 async def transactions(limit: int = 200) -> list[dict]:
     return list_transactions(limit=limit)
+
+
+@app.get("/uploads", response_model=list[UploadHistoryResponse])
+async def uploads(limit: int = 20) -> list[dict]:
+    return list_uploads(limit=bounded_limit(limit, maximum=100))
 
 
 @app.patch("/transactions/{transaction_id}/category", response_model=TransactionResponse)
@@ -293,6 +313,27 @@ async def ask(request: AskRequest) -> AskResponse:
     normalized = question.lower()
     categories = categories_from_question(question)
     month = infer_month(question)
+
+    if looks_like_upload_history_question(normalized):
+        uploads = list_uploads(limit=5)
+        if not uploads:
+            return AskResponse(
+                answer="I do not have any uploaded statements recorded yet.",
+                intent="upload_history",
+            )
+
+        latest = uploads[0]
+        return AskResponse(
+            answer=(
+                f"I found {len(uploads)} recent upload"
+                f"{'' if len(uploads) == 1 else 's'}. "
+                f"The latest is {latest['filename']} with "
+                f"{latest['imported_count']} imported and "
+                f"{latest['duplicates_skipped']} skipped."
+            ),
+            intent="upload_history",
+            data=uploads,
+        )
 
     if has_any(normalized, ["budget", "budgets"]):
         budget_month = month or latest_imported_month()
@@ -484,7 +525,7 @@ async def ask(request: AskRequest) -> AskResponse:
         return AskResponse(
             answer=(
                 "I can answer spending, income, net cash flow, category, merchant, "
-                "budget, recurring charge, largest expense, and anomaly questions."
+                "budget, recurring charge, upload history, largest expense, and anomaly questions."
             ),
             month=month,
         )
@@ -732,6 +773,13 @@ def looks_like_largest_expense_question(question: str) -> bool:
     return (
         has_any(question, ["largest", "biggest", "highest", "top"])
         and has_any(question, ["expense", "charge", "purchase", "transaction"])
+    )
+
+
+def looks_like_upload_history_question(question: str) -> bool:
+    return (
+        has_any(question, ["upload", "uploaded", "import", "imported", "statement", "statements", "file", "files"])
+        and has_any(question, ["history", "recent", "latest", "which", "what", "show", "list"])
     )
 
 
