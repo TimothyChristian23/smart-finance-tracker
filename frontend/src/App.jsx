@@ -6,9 +6,11 @@ import {
   CircleDollarSign,
   FileUp,
   MessageSquare,
+  Plus,
   ReceiptText,
   RefreshCw,
   Store,
+  Target,
   Trash2,
   TrendingUp,
 } from "lucide-react";
@@ -39,6 +41,8 @@ export default function App() {
   const [largestExpenses, setLargestExpenses] = useState([]);
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [merchantRules, setMerchantRules] = useState([]);
+  const [budgets, setBudgets] = useState([]);
+  const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
   const [month, setMonth] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
@@ -70,6 +74,7 @@ export default function App() {
         largestPayload,
         categoryOptionsPayload,
         merchantRulesPayload,
+        budgetPayload,
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
         request("/transactions?limit=12"),
@@ -80,6 +85,7 @@ export default function App() {
         request(`/expenses/largest${queryString({ month: activeMonth, limit: 6 })}`),
         request("/category-options"),
         request("/merchant-rules"),
+        request(`/budgets${queryString({ month: activeMonth })}`),
       ]);
 
       setMonths(monthsPayload);
@@ -92,6 +98,7 @@ export default function App() {
       setLargestExpenses(largestPayload);
       setCategoryOptions(categoryOptionsPayload);
       setMerchantRules(merchantRulesPayload);
+      setBudgets(budgetPayload);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
     } catch (error) {
       setHealth("Offline");
@@ -205,6 +212,49 @@ export default function App() {
     }
   }
 
+  async function handleBudgetSubmit(event) {
+    event.preventDefault();
+    const category = budgetDraft.category || categoryOptions[0] || "";
+    const amount = Number(budgetDraft.amount);
+    if (!month) {
+      setUploadStatus("Choose a month before saving a budget.");
+      return;
+    }
+    if (!category || !amount || amount <= 0) {
+      setUploadStatus("Enter a budget amount greater than zero.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const budget = await request("/budgets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month, category, amount }),
+      });
+      setBudgetDraft({ category: budget.category, amount: "" });
+      setUploadStatus(`Saved ${month} ${budget.category} budget.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteBudget(budget) {
+    setBusy(true);
+    try {
+      await request(`/budgets/${budget.id}`, { method: "DELETE" });
+      setUploadStatus(`Removed ${budget.month} ${budget.category} budget.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const recentTransactions = useMemo(() => transactions.slice(0, 10), [transactions]);
   const trendDomain = useMemo(() => [0, "auto"], []);
 
@@ -268,6 +318,18 @@ export default function App() {
               </LineChart>
             </ResponsiveContainer>
           </ChartFrame>
+        </section>
+
+        <section className="panel budget-panel">
+          <PanelTitle icon={<Target size={18} />} title="Budgets" detail={month || "No month"} />
+          <BudgetForm
+            categories={categoryOptions}
+            disabled={busy || !month || !categoryOptions.length}
+            draft={budgetDraft}
+            onDraftChange={setBudgetDraft}
+            onSubmit={handleBudgetSubmit}
+          />
+          <BudgetList budgets={budgets} busy={busy} onDelete={handleDeleteBudget} />
         </section>
 
         <section className="panel action-panel">
@@ -377,6 +439,84 @@ function MoneyList({ items, emptyText, getTitle, getSubtitle, tone = "default" }
           <b className={tone === "warn" ? "warn" : ""}>{money(Math.abs(item.amount ?? item.total ?? 0))}</b>
         </div>
       ))}
+    </div>
+  );
+}
+
+function BudgetForm({ categories, disabled, draft, onDraftChange, onSubmit }) {
+  const selectedCategory = draft.category || categories[0] || "";
+
+  return (
+    <form className="budget-form" onSubmit={onSubmit}>
+      <select
+        aria-label="Budget category"
+        disabled={disabled}
+        onChange={(event) => onDraftChange({ ...draft, category: event.target.value })}
+        value={selectedCategory}
+      >
+        {!selectedCategory && <option value="">Category</option>}
+        {categories.map((category) => (
+          <option key={category} value={category}>{category}</option>
+        ))}
+      </select>
+      <input
+        aria-label="Budget amount"
+        disabled={disabled}
+        min="0.01"
+        onChange={(event) => onDraftChange({ ...draft, amount: event.target.value })}
+        placeholder="Amount"
+        step="0.01"
+        type="number"
+        value={draft.amount}
+      />
+      <button type="submit" disabled={disabled || !selectedCategory || !draft.amount}>
+        <Plus size={16} />
+        Save
+      </button>
+    </form>
+  );
+}
+
+function BudgetList({ budgets, busy, onDelete }) {
+  if (!budgets.length) return <p className="empty">No budgets for this month.</p>;
+
+  return (
+    <div className="budget-list">
+      {budgets.map((budget) => (
+        <BudgetRow budget={budget} busy={busy} key={budget.id} onDelete={onDelete} />
+      ))}
+    </div>
+  );
+}
+
+function BudgetRow({ budget, busy, onDelete }) {
+  const used = Math.max(0, Math.min(Number(budget.percent_used) || 0, 100));
+  const remainingLabel = budget.remaining >= 0
+    ? `${money(budget.remaining)} left`
+    : `${money(Math.abs(budget.remaining))} over`;
+
+  return (
+    <div className={`budget-row budget-${budget.status}`}>
+      <div className="budget-main">
+        <div className="budget-topline">
+          <strong>{budget.category}</strong>
+          <span>{money(budget.spent)} / {money(budget.amount)}</span>
+        </div>
+        <div className="budget-meter" aria-label={`${budget.percent_used}% used`}>
+          <span style={{ width: `${used}%` }} />
+        </div>
+        <small>{remainingLabel} | {budget.percent_used}% used</small>
+      </div>
+      <button
+        aria-label={`Delete ${budget.category} budget`}
+        className="row-icon-button"
+        disabled={busy}
+        onClick={() => onDelete(budget)}
+        title="Delete budget"
+        type="button"
+      >
+        <Trash2 size={15} />
+      </button>
     </div>
   );
 }

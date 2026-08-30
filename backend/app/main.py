@@ -16,8 +16,10 @@ from pypdf import PdfReader
 from app.categorization import CATEGORY_OPTIONS, categories_from_question, categorize_transaction
 from app.database import (
     available_months,
+    budget_progress,
     category_totals,
     cents_to_dollars,
+    delete_budget,
     delete_merchant_rule,
     detect_anomalies,
     insert_transactions,
@@ -29,6 +31,7 @@ from app.database import (
     reset_db,
     spending_for_categories,
     top_merchants,
+    upsert_budget,
     update_transaction_category,
 )
 
@@ -68,6 +71,24 @@ class MerchantRuleResponse(BaseModel):
     merchant: str
     merchant_key: str
     category: str
+    updated_at: str
+
+
+class BudgetUpsertRequest(BaseModel):
+    month: str = Field(..., min_length=7, max_length=7)
+    category: str = Field(..., min_length=1, max_length=80)
+    amount: float = Field(..., gt=0)
+
+
+class BudgetResponse(BaseModel):
+    id: int
+    month: str
+    category: str
+    amount: float
+    spent: float
+    remaining: float
+    percent_used: float
+    status: str
     updated_at: str
 
 
@@ -201,6 +222,31 @@ async def categories(month: str | None = None) -> list[dict]:
     return category_totals(month=validate_month(month))
 
 
+@app.get("/budgets", response_model=list[BudgetResponse])
+async def budgets(month: str | None = None) -> list[dict]:
+    budget_month = validate_month(month)
+    if budget_month is None:
+        return []
+    return budget_progress(budget_month)
+
+
+@app.put("/budgets", response_model=BudgetResponse)
+async def save_budget(request: BudgetUpsertRequest) -> dict:
+    month = validate_month(request.month)
+    category = validate_category(request.category)
+    amount_cents = dollars_to_cents(request.amount)
+    if amount_cents <= 0:
+        raise HTTPException(status_code=400, detail="budget amount must be at least $0.01.")
+    return upsert_budget(month, category, amount_cents)
+
+
+@app.delete("/budgets/{budget_id}")
+async def remove_budget(budget_id: int) -> dict:
+    if not delete_budget(budget_id):
+        raise HTTPException(status_code=404, detail="Budget not found.")
+    return {"message": "Budget deleted."}
+
+
 @app.get("/trends")
 async def trends(limit: int = 12) -> list[dict]:
     return monthly_trends(limit=bounded_limit(limit, maximum=36))
@@ -228,6 +274,51 @@ async def ask(request: AskRequest) -> AskResponse:
     normalized = question.lower()
     categories = categories_from_question(question)
     month = infer_month(question)
+
+    if has_any(normalized, ["budget", "budgets"]):
+        budget_month = month or latest_imported_month()
+        if budget_month is None:
+            return AskResponse(
+                answer="I do not have any imported months to compare against budgets yet.",
+                intent="budgets",
+            )
+
+        budget_items = budget_progress(budget_month)
+        if not budget_items:
+            return AskResponse(
+                answer=f"I do not have budgets for {format_month_label(budget_month)} yet.",
+                month=budget_month,
+                intent="budgets",
+            )
+
+        over_budget = [item for item in budget_items if item["status"] == "over"]
+        if over_budget:
+            largest_gap = max(over_budget, key=lambda item: item["spent"] - item["amount"])
+            return AskResponse(
+                answer=(
+                    f"You are over budget in {len(over_budget)} categor"
+                    f"{'y' if len(over_budget) == 1 else 'ies'} for {format_month_label(budget_month)}. "
+                    f"{largest_gap['category']} is {format_money(abs(largest_gap['remaining']))} over."
+                ),
+                amount=abs(largest_gap["remaining"]),
+                categories=[item["category"] for item in over_budget],
+                month=budget_month,
+                intent="budgets",
+                data=budget_items,
+            )
+
+        total_remaining = sum(item["remaining"] for item in budget_items)
+        return AskResponse(
+            answer=(
+                f"You are within all budgets for {format_month_label(budget_month)} with "
+                f"{format_money(total_remaining)} remaining."
+            ),
+            amount=total_remaining,
+            categories=[item["category"] for item in budget_items],
+            month=budget_month,
+            intent="budgets",
+            data=budget_items,
+        )
 
     if has_any(normalized, ["anomaly", "anomalies", "unusual", "weird", "outlier"]):
         items = detect_anomalies(limit=5, month=month)
@@ -580,6 +671,11 @@ def bounded_limit(limit: int, maximum: int = 100) -> int:
     return max(1, min(limit, maximum))
 
 
+def latest_imported_month() -> str | None:
+    months = available_months()
+    return months[0]["month"] if months else None
+
+
 def has_any(text: str, terms: list[str]) -> bool:
     return any(term in text for term in terms)
 
@@ -604,3 +700,7 @@ def format_month_label(month: str | None) -> str:
 
 def format_money(value: float) -> str:
     return f"${value:,.2f}"
+
+
+def dollars_to_cents(value: float) -> int:
+    return int((Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))

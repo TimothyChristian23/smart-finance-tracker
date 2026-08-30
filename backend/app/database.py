@@ -67,6 +67,25 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS budgets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month TEXT NOT NULL,
+            category TEXT NOT NULL,
+            amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(month, category)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_budgets_month
+        ON budgets (month)
+        """
+    )
     conn.commit()
 
 
@@ -238,6 +257,81 @@ def delete_merchant_rule(rule_id: int) -> bool:
             WHERE id = ?
             """,
             (rule_id,),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+
+def budget_progress(month: str) -> list[dict]:
+    """Return monthly budget targets with live spending progress."""
+    where_sql, params = _month_filter(month)
+    with connect() as conn:
+        spending_rows = conn.execute(
+            f"""
+            SELECT category, COALESCE(SUM(ABS(amount_cents)), 0) AS spent_cents
+            FROM transactions
+            {where_sql}
+              {"AND" if where_sql else "WHERE"} amount_cents < 0
+            GROUP BY category
+            """,
+            params,
+        ).fetchall()
+        budget_rows = conn.execute(
+            """
+            SELECT id, month, category, amount_cents, updated_at
+            FROM budgets
+            WHERE month = ?
+            ORDER BY category
+            """,
+            (month,),
+        ).fetchall()
+
+    spending_by_category = {
+        row["category"]: int(row["spent_cents"])
+        for row in spending_rows
+    }
+    return [
+        _budget_row_to_dict(row, spending_by_category.get(row["category"], 0))
+        for row in budget_rows
+    ]
+
+
+def upsert_budget(month: str, category: str, amount_cents: int) -> dict:
+    """Create or update a monthly category budget."""
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO budgets (month, category, amount_cents)
+            VALUES (?, ?, ?)
+            ON CONFLICT(month, category) DO UPDATE SET
+                amount_cents = excluded.amount_cents,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (month, category, amount_cents),
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT id, month, category, amount_cents, updated_at
+            FROM budgets
+            WHERE month = ? AND category = ?
+            """,
+            (month, category),
+        ).fetchone()
+
+    progress = budget_progress(month)
+    return next(item for item in progress if item["id"] == row["id"])
+
+
+def delete_budget(budget_id: int) -> bool:
+    """Delete a monthly category budget by id."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM budgets
+            WHERE id = ?
+            """,
+            (budget_id,),
         )
         conn.commit()
     return cursor.rowcount > 0
@@ -528,6 +622,30 @@ def _merchant_rule_row_to_dict(row: sqlite3.Row) -> dict:
         "merchant": row["merchant_name"],
         "merchant_key": row["merchant_key"],
         "category": row["category"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _budget_row_to_dict(row: sqlite3.Row, spent_cents: int) -> dict:
+    amount_cents = int(row["amount_cents"])
+    remaining_cents = amount_cents - spent_cents
+    percent_used = round((spent_cents / amount_cents) * 100, 1)
+    if spent_cents > amount_cents:
+        status = "over"
+    elif spent_cents >= amount_cents * 0.85:
+        status = "near"
+    else:
+        status = "on_track"
+
+    return {
+        "id": row["id"],
+        "month": row["month"],
+        "category": row["category"],
+        "amount": cents_to_dollars(amount_cents),
+        "spent": cents_to_dollars(spent_cents),
+        "remaining": cents_to_dollars(remaining_cents),
+        "percent_used": percent_used,
+        "status": status,
         "updated_at": row["updated_at"],
     }
 

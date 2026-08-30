@@ -223,6 +223,50 @@ def test_analytics_endpoints_return_months_categories_trends_and_merchants():
     assert largest[0]["description"] == "Apartment Rent"
 
 
+def test_budget_progress_uses_live_category_spending():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.put(
+        "/budgets",
+        json={"month": "2026-07", "category": "Food & Grocery", "amount": 300},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["category"] == "Food & Grocery"
+    assert payload["amount"] == 300.0
+    assert payload["spent"] == 367.1
+    assert payload["remaining"] == -67.1
+    assert payload["percent_used"] == 122.4
+    assert payload["status"] == "over"
+
+    updated = client.put(
+        "/budgets",
+        json={"month": "2026-07", "category": "Food & Grocery", "amount": 500},
+    ).json()
+    assert updated["id"] == payload["id"]
+    assert updated["remaining"] == 132.9
+    assert updated["status"] == "on_track"
+
+    budgets = client.get("/budgets?month=2026-07").json()
+    assert len(budgets) == 1
+    assert budgets[0]["amount"] == 500.0
+
+    delete_response = client.delete(f"/budgets/{payload['id']}")
+    assert delete_response.status_code == 200
+    assert client.get("/budgets?month=2026-07").json() == []
+
+
+def test_budget_api_rejects_unknown_category():
+    response = client.put(
+        "/budgets",
+        json={"month": "2026-07", "category": "Mystery", "amount": 300},
+    )
+
+    assert response.status_code == 400
+    assert "category must be one of" in response.json()["detail"]
+
+
 def test_ask_handles_spending_income_and_ranking_questions():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
 
@@ -245,6 +289,21 @@ def test_ask_handles_spending_income_and_ranking_questions():
     assert largest["data"][0]["description"] == "Apartment Rent"
     assert anomalies["intent"] == "anomalies"
     assert anomalies["data"][0]["description"] == "One-Time Electronics Store"
+
+
+def test_ask_handles_budget_questions():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    client.put("/budgets", json={"month": "2026-07", "category": "Housing", "amount": 1200})
+    client.put("/budgets", json={"month": "2026-07", "category": "Shopping", "amount": 1200})
+
+    response = client.post("/ask", json={"question": "Am I over budget in July 2026?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "budgets"
+    assert payload["amount"] == 250.0
+    assert payload["categories"] == ["Housing"]
+    assert "Housing is $250.00 over" in payload["answer"]
 
 
 def test_parse_transactions_csv_supports_debit_credit_columns():

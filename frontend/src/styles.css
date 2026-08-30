@@ -110,6 +110,8 @@ h2 {
 
 .topbar-actions select,
 .category-select,
+.budget-form select,
+.budget-form input,
 .upload-form input,
 .ask-form textarea {
   border: 1px solid var(--line);
@@ -126,6 +128,8 @@ h2 {
 
 .topbar-actions select:focus,
 .category-select:focus,
+.budget-form select:focus,
+.budget-form input:focus,
 .upload-form input:focus,
 .ask-form textarea:focus {
   border-color: var(--accent);
@@ -266,13 +270,26 @@ h2 {
 }
 
 .upload-form,
+.budget-form,
 .ask-form {
   display: grid;
   gap: 10px;
 }
 
+.budget-form {
+  grid-template-columns: minmax(0, 1fr) 104px auto;
+  margin-bottom: 12px;
+}
+
 .upload-form input {
   min-height: 42px;
+  padding: 8px;
+}
+
+.budget-form select,
+.budget-form input {
+  min-width: 0;
+  min-height: 40px;
   padding: 8px;
 }
 
@@ -285,6 +302,7 @@ h2 {
 }
 
 .upload-form button,
+.budget-form button,
 .ask-form button,
 .ghost-button {
   display: inline-flex;
@@ -296,6 +314,7 @@ h2 {
 }
 
 .upload-form button,
+.budget-form button,
 .ask-form button {
   background: var(--accent);
   color: #fff;
@@ -381,6 +400,65 @@ h2 {
 
 .list-row b.warn {
   color: var(--warn);
+}
+
+.budget-list {
+  display: grid;
+  gap: 9px;
+}
+
+.budget-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 10px;
+  align-items: center;
+  min-height: 86px;
+  border: 1px solid var(--line);
+  padding: 10px;
+}
+
+.budget-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.budget-topline strong {
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+}
+
+.budget-topline span,
+.budget-main small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.budget-topline span {
+  white-space: nowrap;
+}
+
+.budget-meter {
+  height: 8px;
+  margin: 10px 0 6px;
+  overflow: hidden;
+  border: 1px solid rgba(36, 120, 106, 0.2);
+  background: #eef3f6;
+}
+
+.budget-meter span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.budget-near .budget-meter span {
+  background: var(--warn);
+}
+
+.budget-over .budget-meter span {
+  background: var(--bad);
 }
 
 .transactions-panel {
@@ -517,6 +595,10 @@ h2 {
   }
 
   .button-row {
+    grid-template-columns: 1fr;
+  }
+
+  .budget-form {
     grid-template-columns: 1fr;
   }
 

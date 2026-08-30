@@ -12,10 +12,11 @@ The first implementation slice focuses on trustworthy analytics:
 - Rule-based starter categorization
 - Editable transaction categories
 - Saved merchant rules that apply to future imports
+- Monthly category budgets with live progress
 - Monthly spending summaries
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection
-- Deterministic question answering for spending, income, category, merchant, largest expense, and anomaly questions
+- Deterministic question answering for spending, income, category, merchant, budget, largest expense, and anomaly questions
 - React dashboard scaffold
 - Locked frontend dependency install and production build
 - GitHub Actions backend test and frontend build workflows
@@ -105,12 +106,15 @@ GET  /summary?month=2026-07
 GET  /months
 GET  /categories?month=2026-07
 GET  /category-options
+GET  /budgets?month=2026-07
 GET  /trends
 GET  /merchants?month=2026-07
 GET  /merchant-rules
 GET  /expenses/largest?month=2026-07
 GET  /anomalies?month=2026-07
+PUT  /budgets
 PATCH /transactions/{id}/category
+DELETE /budgets/{id}
 DELETE /merchant-rules/{id}
 POST /ask
 ```
