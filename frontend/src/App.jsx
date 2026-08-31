@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookmarkPlus,
   CalendarClock,
+  Check,
   ClipboardList,
   CircleDollarSign,
   Download,
@@ -17,6 +18,7 @@ import {
   RefreshCw,
   Search,
   Store,
+  Tags,
   Target,
   Trash2,
   TrendingUp,
@@ -50,6 +52,7 @@ export default function App() {
   const [merchants, setMerchants] = useState([]);
   const [largestExpenses, setLargestExpenses] = useState([]);
   const [categoryOptions, setCategoryOptions] = useState([]);
+  const [categoryReview, setCategoryReview] = useState([]);
   const [merchantRules, setMerchantRules] = useState([]);
   const [budgets, setBudgets] = useState([]);
   const [budgetRecommendations, setBudgetRecommendations] = useState([]);
@@ -89,6 +92,7 @@ export default function App() {
         merchantPayload,
         largestPayload,
         categoryOptionsPayload,
+        categoryReviewPayload,
         merchantRulesPayload,
         budgetPayload,
         budgetRecommendationPayload,
@@ -110,6 +114,7 @@ export default function App() {
         request(`/merchants${queryString({ month: activeMonth, limit: 6 })}`),
         request(`/expenses/largest${queryString({ month: activeMonth, limit: 6 })}`),
         request("/category-options"),
+        request(`/categories/review${queryString({ month: activeMonth, limit: 6 })}`),
         request("/merchant-rules"),
         request(`/budgets${queryString({ month: activeMonth })}`),
         request(`/budgets/recommendations${queryString({ month: activeMonth, limit: 6 })}`),
@@ -128,6 +133,7 @@ export default function App() {
       setMerchants(merchantPayload);
       setLargestExpenses(largestPayload);
       setCategoryOptions(categoryOptionsPayload);
+      setCategoryReview(categoryReviewPayload);
       setMerchantRules(merchantRulesPayload);
       setBudgets(budgetPayload);
       setBudgetRecommendations(budgetRecommendationPayload);
@@ -316,6 +322,10 @@ export default function App() {
     }
   }
 
+  async function handleApplyCategorySuggestion(item) {
+    await handleCategoryChange(item.transaction, item.suggested_category, true);
+  }
+
   function handleTransactionFilterChange(name, value) {
     setTransactionFilters((current) => ({ ...current, [name]: value }));
   }
@@ -427,6 +437,15 @@ export default function App() {
             busy={busy}
             onApply={handleApplyBudgetRecommendation}
             recommendations={budgetRecommendations}
+          />
+        </section>
+
+        <section className="panel category-review-panel">
+          <PanelTitle icon={<Tags size={18} />} title="Category Review" detail={`${categoryReview.length} queued`} />
+          <CategoryReviewList
+            busy={busy || updatingTransactionId !== null}
+            items={categoryReview}
+            onApply={handleApplyCategorySuggestion}
           />
         </section>
 
@@ -674,6 +693,35 @@ function BudgetRecommendationList({ busy, onApply, recommendations }) {
               <Plus size={15} />
               Use
             </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CategoryReviewList({ busy, items, onApply }) {
+  if (!items.length) return <p className="empty">No category review items.</p>;
+
+  return (
+    <div className="category-review-list">
+      {items.map((item) => (
+        <div className={`category-review-row category-review-${item.action}`} key={item.transaction.id}>
+          <div>
+            <strong>{item.transaction.description}</strong>
+            <span>{item.current_category} to {item.suggested_category} | {Math.round(item.confidence * 100)}% confidence</span>
+            <small>{item.reason}</small>
+          </div>
+          <div className="category-review-action">
+            <b>{money(Math.abs(item.transaction.amount))}</b>
+            {item.action === "update" ? (
+              <button disabled={busy} onClick={() => onApply(item)} type="button">
+                <Check size={15} />
+                Apply
+              </button>
+            ) : (
+              <span>Review</span>
+            )}
           </div>
         </div>
       ))}

@@ -12,6 +12,7 @@ The first implementation slice focuses on trustworthy analytics:
 - SQLite transaction storage
 - Rule-based starter categorization
 - Editable transaction categories
+- Category review queue with confidence-scored suggestions
 - Saved merchant rules that apply to future imports
 - Monthly category budgets with live progress
 - Budget recommendations from recent history and recurring charges
@@ -119,6 +120,7 @@ GET  /uploads
 GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
 GET  /categories?month=2026-07
+GET  /categories/review?month=2026-07
 GET  /category-options
 GET  /budgets?month=2026-07
 GET  /budgets/recommendations?month=2026-08
@@ -161,6 +163,10 @@ or apply a recommendation directly from the dashboard.
 
 Broad Q&A questions retrieve relevant transaction evidence and return citations in
 the answer card. Exact totals still come from deterministic database calculations.
+
+The category review queue surfaces uncertain imported categories and suggests a
+more likely category when the rule hints have enough signal. Applying a suggestion
+can also save a merchant rule for future imports.
 
 ## Notes
 

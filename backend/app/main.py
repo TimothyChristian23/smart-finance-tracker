@@ -18,6 +18,7 @@ from app.database import (
     available_months,
     budget_progress,
     budget_recommendations,
+    category_review_queue,
     category_totals,
     cents_to_dollars,
     delete_budget,
@@ -78,6 +79,15 @@ class TransactionResponse(BaseModel):
     amount: float
     category: str
     source_file: str | None = None
+
+
+class CategoryReviewResponse(BaseModel):
+    transaction: TransactionResponse
+    current_category: str
+    suggested_category: str
+    confidence: float
+    reason: str
+    action: str
 
 
 class CategoryUpdateRequest(BaseModel):
@@ -322,6 +332,11 @@ async def update_category(transaction_id: int, request: CategoryUpdateRequest) -
 @app.get("/category-options", response_model=list[str])
 async def category_options() -> list[str]:
     return CATEGORY_OPTIONS
+
+
+@app.get("/categories/review", response_model=list[CategoryReviewResponse])
+async def category_review(month: str | None = None, limit: int = 20) -> list[dict]:
+    return category_review_queue(month=validate_month(month), limit=bounded_limit(limit))
 
 
 @app.get("/merchant-rules", response_model=list[MerchantRuleResponse])

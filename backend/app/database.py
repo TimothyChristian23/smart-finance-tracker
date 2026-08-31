@@ -9,7 +9,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from app.categorization import normalize_text
+from app.categorization import normalize_text, suggest_category
 
 load_dotenv()
 
@@ -482,6 +482,56 @@ def list_transactions(
             [*params, limit],
         ).fetchall()
     return [_transaction_row_to_dict(row) for row in rows]
+
+
+def category_review_queue(month: str | None = None, limit: int = 20) -> list[dict]:
+    """Return transactions whose category could use review."""
+    where_sql, params = _month_filter(month)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, transaction_date, description, amount_cents, category, source_file
+            FROM transactions
+            {where_sql}
+            ORDER BY transaction_date DESC, ABS(amount_cents) DESC
+            LIMIT 500
+            """,
+            params,
+        ).fetchall()
+
+    review_items = []
+    for row in rows:
+        if int(row["amount_cents"]) > 0:
+            continue
+
+        suggestion = suggest_category(row["description"], int(row["amount_cents"]), row["category"])
+        needs_review = (
+            row["category"] == "Other"
+            or suggestion["category"] != row["category"]
+        )
+        if not needs_review:
+            continue
+
+        transaction = _transaction_row_to_dict(row)
+        review_items.append({
+            "transaction": transaction,
+            "current_category": row["category"],
+            "suggested_category": suggestion["category"],
+            "confidence": suggestion["confidence"],
+            "reason": suggestion["reason"],
+            "action": "update" if suggestion["category"] != row["category"] else "review",
+        })
+
+    action_priority = {"update": 1, "review": 0}
+    return sorted(
+        review_items,
+        key=lambda item: (
+            action_priority[item["action"]],
+            item["confidence"],
+            abs(item["transaction"]["amount"]),
+        ),
+        reverse=True,
+    )[:limit]
 
 
 def monthly_summary(month: str | None = None) -> dict:

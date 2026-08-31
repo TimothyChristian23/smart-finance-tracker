@@ -225,6 +225,38 @@ def test_unknown_transaction_category_is_rejected():
     assert "category must be one of" in response.json()["detail"]
 
 
+def test_category_review_queue_suggests_uncertain_updates():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    response = client.get("/categories/review?month=2026-07")
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_description = {
+        item["transaction"]["description"]: item
+        for item in payload
+    }
+    assert set(by_description) == {"Gym Membership", "Random Shop"}
+    assert by_description["Gym Membership"]["current_category"] == "Other"
+    assert by_description["Gym Membership"]["suggested_category"] == "Health"
+    assert by_description["Gym Membership"]["confidence"] == 0.74
+    assert by_description["Gym Membership"]["action"] == "update"
+    assert by_description["Random Shop"]["suggested_category"] == "Shopping"
+
+    gym_id = by_description["Gym Membership"]["transaction"]["id"]
+    update_response = client.patch(
+        f"/transactions/{gym_id}/category",
+        json={"category": "Health", "remember": True},
+    )
+    assert update_response.status_code == 200
+
+    updated_queue = client.get("/categories/review?month=2026-07").json()
+    assert "Gym Membership" not in {
+        item["transaction"]["description"]
+        for item in updated_queue
+    }
+
+
 def test_pdf_upload_imports_text_statement_rows():
     pdf_bytes = make_pdf_bytes([
         "Account Statement",
