@@ -859,6 +859,67 @@ def monthly_forecast(month: str | None = None) -> dict:
     }
 
 
+def budget_recommendations(month: str | None = None, limit: int = 8) -> list[dict]:
+    """Suggest category budgets from recent spending and recurring charges."""
+    target_month = month or _latest_month()
+    if target_month is None:
+        return []
+
+    history = _category_spending_history(target_month, lookback=3)
+    recurring_by_category = _recurring_spending_by_category(target_month)
+    existing_by_category = {
+        item["category"]: item
+        for item in budget_progress(target_month)
+    }
+    recommendation_categories = sorted(set(history) | set(recurring_by_category))
+
+    recommendations = []
+    for category in recommendation_categories:
+        history_rows = history.get(category, [])
+        history_cents = [row["total_cents"] for row in history_rows]
+        average_cents = int((sum(history_cents) / len(history_cents)) + 0.5) if history_cents else 0
+        recurring_cents = recurring_by_category.get(category, 0)
+        baseline_cents = max(average_cents, recurring_cents)
+        if baseline_cents <= 0:
+            continue
+
+        buffer = 1.05 if recurring_cents >= average_cents and recurring_cents else 1.1
+        recommended_cents = _round_up_to_nearest_cents(int((baseline_cents * buffer) + 0.5))
+        existing_budget = existing_by_category.get(category)
+        existing_cents = _dollars_to_cents(existing_budget["amount"]) if existing_budget else None
+
+        recommendations.append({
+            "month": target_month,
+            "category": category,
+            "recommended_amount": cents_to_dollars(recommended_cents),
+            "baseline_average": cents_to_dollars(average_cents),
+            "recurring_amount": cents_to_dollars(recurring_cents),
+            "history_months": len(history_rows),
+            "existing_budget": cents_to_dollars(existing_cents) if existing_cents is not None else None,
+            "difference_from_existing": (
+                cents_to_dollars(recommended_cents - existing_cents)
+                if existing_cents is not None
+                else cents_to_dollars(recommended_cents)
+            ),
+            "confidence": _budget_recommendation_confidence(len(history_rows), recurring_cents),
+            "action": _budget_recommendation_action(recommended_cents, existing_cents),
+            "reason": _budget_recommendation_reason(
+                history_months=len(history_rows),
+                average_cents=average_cents,
+                recurring_cents=recurring_cents,
+                recommended_cents=recommended_cents,
+                existing_cents=existing_cents,
+            ),
+        })
+
+    action_priority = {"raise": 3, "create": 2, "review": 1, "keep": 0}
+    return sorted(
+        recommendations,
+        key=lambda item: (action_priority[item["action"]], item["recommended_amount"]),
+        reverse=True,
+    )[:limit]
+
+
 def spending_for_categories(categories: list[str], month: str | None = None) -> int:
     """Return spending cents for the requested categories."""
     if not categories:
@@ -1115,6 +1176,104 @@ def _forecast_notes(
     else:
         notes.append("Budget categories are currently on track.")
     return notes[:5]
+
+
+def _category_spending_history(month: str, lookback: int = 3) -> dict[str, list[dict]]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            WITH recent_months AS (
+                SELECT DISTINCT substr(transaction_date, 1, 7) AS month
+                FROM transactions
+                WHERE amount_cents < 0
+                  AND substr(transaction_date, 1, 7) <= ?
+                ORDER BY month DESC
+                LIMIT ?
+            )
+            SELECT
+                substr(t.transaction_date, 1, 7) AS month,
+                t.category,
+                COALESCE(SUM(ABS(t.amount_cents)), 0) AS total_cents,
+                COUNT(*) AS transaction_count
+            FROM transactions t
+            JOIN recent_months rm ON rm.month = substr(t.transaction_date, 1, 7)
+            WHERE t.amount_cents < 0
+            GROUP BY month, t.category
+            ORDER BY month DESC, total_cents DESC
+            """,
+            (month, lookback),
+        ).fetchall()
+
+    history: dict[str, list[dict]] = {}
+    for row in rows:
+        history.setdefault(row["category"], []).append({
+            "month": row["month"],
+            "total_cents": int(row["total_cents"]),
+            "transaction_count": row["transaction_count"],
+        })
+    return history
+
+
+def _recurring_spending_by_category(month: str) -> dict[str, int]:
+    spending: dict[str, int] = {}
+    for charge in _upcoming_recurring_charges(month, coverage_date=None):
+        spending[charge["category"]] = spending.get(charge["category"], 0) + _dollars_to_cents(charge["average_amount"])
+    return spending
+
+
+def _round_up_to_nearest_cents(value_cents: int, nearest_cents: int = 1000) -> int:
+    if value_cents <= 0:
+        return 0
+    return ((value_cents + nearest_cents - 1) // nearest_cents) * nearest_cents
+
+
+def _dollars_to_cents(value: float) -> int:
+    return int(round(float(value) * 100))
+
+
+def _budget_recommendation_confidence(history_months: int, recurring_cents: int) -> str:
+    if history_months >= 3 and recurring_cents:
+        return "high"
+    if history_months >= 3:
+        return "medium"
+    if history_months >= 2 or recurring_cents:
+        return "medium"
+    return "low"
+
+
+def _budget_recommendation_action(recommended_cents: int, existing_cents: int | None) -> str:
+    if existing_cents is None:
+        return "create"
+    if existing_cents < recommended_cents * 0.95:
+        return "raise"
+    if existing_cents > recommended_cents * 1.25:
+        return "review"
+    return "keep"
+
+
+def _budget_recommendation_reason(
+    history_months: int,
+    average_cents: int,
+    recurring_cents: int,
+    recommended_cents: int,
+    existing_cents: int | None,
+) -> str:
+    if recurring_cents >= average_cents and recurring_cents:
+        reason = f"Expected recurring charges total {_format_money(cents_to_dollars(recurring_cents))}."
+    elif history_months > 1:
+        reason = (
+            f"Recent average spending is {_format_money(cents_to_dollars(average_cents))} "
+            f"across {history_months} months."
+        )
+    else:
+        reason = f"Latest spending baseline is {_format_money(cents_to_dollars(average_cents))}."
+
+    if existing_cents is None:
+        return f"{reason} Suggested budget is {_format_money(cents_to_dollars(recommended_cents))}."
+    if existing_cents < recommended_cents:
+        gap = cents_to_dollars(recommended_cents - existing_cents)
+        return f"{reason} Existing budget is {_format_money(gap)} below the suggestion."
+    return reason
 
 
 def _monthly_highlights(

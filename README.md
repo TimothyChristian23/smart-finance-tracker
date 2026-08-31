@@ -14,6 +14,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Editable transaction categories
 - Saved merchant rules that apply to future imports
 - Monthly category budgets with live progress
+- Budget recommendations from recent history and recurring charges
 - Recurring charge and subscription detection
 - Transaction search, category filtering, and CSV export
 - Monthly spending summaries
@@ -21,7 +22,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Cash-flow forecasts from imported activity and upcoming recurring charges
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection
-- Deterministic question answering for spending, income, category, merchant, budget, forecast, recurring charge, monthly report, largest expense, and anomaly questions
+- Deterministic question answering for spending, income, category, merchant, budget, budget recommendation, forecast, recurring charge, monthly report, largest expense, and anomaly questions
 - React dashboard scaffold
 - Locked frontend dependency install and production build
 - GitHub Actions backend test and frontend build workflows
@@ -118,6 +119,7 @@ GET  /transactions/export?month=2026-07
 GET  /categories?month=2026-07
 GET  /category-options
 GET  /budgets?month=2026-07
+GET  /budgets/recommendations?month=2026-08
 GET  /trends
 GET  /merchants?month=2026-07
 GET  /merchant-rules
@@ -150,6 +152,10 @@ top merchants, largest expenses, and anomalies into a deterministic snapshot. As
 Cash-flow forecasts estimate month-end spending from imported activity and upcoming
 recurring charges. Ask `What am I projected to spend in August 2026?` to get the
 same forecast through the Q&A panel.
+
+Budget recommendations use recent category spending and upcoming recurring charges
+to suggest starting targets. Ask `What budgets do you recommend for August 2026?`
+or apply a recommendation directly from the dashboard.
 
 ## Notes
 

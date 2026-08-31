@@ -17,6 +17,7 @@ from app.categorization import CATEGORY_OPTIONS, categories_from_question, categ
 from app.database import (
     available_months,
     budget_progress,
+    budget_recommendations,
     category_totals,
     cents_to_dollars,
     delete_budget,
@@ -107,6 +108,20 @@ class BudgetResponse(BaseModel):
     percent_used: float
     status: str
     updated_at: str
+
+
+class BudgetRecommendationResponse(BaseModel):
+    month: str
+    category: str
+    recommended_amount: float
+    baseline_average: float
+    recurring_amount: float
+    history_months: int
+    existing_budget: float | None = None
+    difference_from_existing: float
+    confidence: str
+    action: str
+    reason: str
 
 
 class RecurringChargeResponse(BaseModel):
@@ -352,6 +367,11 @@ async def budgets(month: str | None = None) -> list[dict]:
     return budget_progress(budget_month)
 
 
+@app.get("/budgets/recommendations", response_model=list[BudgetRecommendationResponse])
+async def recommended_budgets(month: str | None = None, limit: int = 8) -> list[dict]:
+    return budget_recommendations(month=validate_month(month), limit=bounded_limit(limit))
+
+
 @app.put("/budgets", response_model=BudgetResponse)
 async def save_budget(request: BudgetUpsertRequest) -> dict:
     month = validate_month(request.month)
@@ -477,6 +497,31 @@ async def ask(request: AskRequest) -> AskResponse:
             month=forecast_data["month"],
             intent="monthly_forecast",
             data=[forecast_data],
+        )
+
+    if looks_like_budget_recommendation_question(normalized):
+        recommendation_month = month or latest_imported_month()
+        recommendations = budget_recommendations(month=recommendation_month, limit=5)
+        if not recommendations:
+            return AskResponse(
+                answer="I do not have enough spending history to recommend budgets yet.",
+                month=recommendation_month,
+                intent="budget_recommendations",
+            )
+
+        lead = recommendations[0]
+        return AskResponse(
+            answer=(
+                f"For {format_month_label(lead['month'])}, I recommend starting with "
+                f"{lead['category']} at {format_money(lead['recommended_amount'])}. "
+                f"I found {len(recommendations)} suggested budget "
+                f"categor{'y' if len(recommendations) == 1 else 'ies'}."
+            ),
+            amount=lead["recommended_amount"],
+            categories=[item["category"] for item in recommendations],
+            month=lead["month"],
+            intent="budget_recommendations",
+            data=recommendations,
         )
 
     if has_any(normalized, ["budget", "budgets"]):
@@ -966,6 +1011,13 @@ def looks_like_forecast_question(question: str) -> bool:
     return (
         has_any(question, ["forecast", "project", "projected", "projection", "pace", "run rate", "expected"])
         or "rest of the month" in question
+    )
+
+
+def looks_like_budget_recommendation_question(question: str) -> bool:
+    return (
+        has_any(question, ["budget", "budgets"])
+        and has_any(question, ["recommend", "recommended", "suggest", "suggested", "should"])
     )
 
 

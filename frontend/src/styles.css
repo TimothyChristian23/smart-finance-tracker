@@ -506,6 +506,83 @@ h2 {
   gap: 9px;
 }
 
+.recommendation-list {
+  display: grid;
+  gap: 9px;
+}
+
+.recommendation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 92px;
+  border: 1px solid var(--line);
+  padding: 10px;
+}
+
+.recommendation-row strong,
+.recommendation-row span,
+.recommendation-row small {
+  display: block;
+}
+
+.recommendation-row strong {
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+}
+
+.recommendation-row span {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.recommendation-row small {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: capitalize;
+}
+
+.recommendation-raise {
+  border-left: 4px solid var(--warn);
+}
+
+.recommendation-create {
+  border-left: 4px solid var(--accent);
+}
+
+.recommendation-review {
+  border-left: 4px solid var(--blue);
+}
+
+.recommendation-action {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.recommendation-action b {
+  color: var(--ink);
+  font-size: 1rem;
+  white-space: nowrap;
+}
+
+.recommendation-action button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--accent);
+  color: #fff;
+  padding: 0 10px;
+  font-weight: 900;
+}
+
 .budget-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 32px;
@@ -748,6 +825,18 @@ h2 {
 
   .budget-form {
     grid-template-columns: 1fr;
+  }
+
+  .recommendation-row {
+    grid-template-columns: 1fr;
+  }
+
+  .recommendation-action {
+    justify-items: stretch;
+  }
+
+  .recommendation-action b {
+    text-align: left;
   }
 
   .forecast-stats {

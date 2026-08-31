@@ -9,6 +9,7 @@ import {
   Download,
   FileUp,
   History,
+  Lightbulb,
   MessageSquare,
   Plus,
   ReceiptText,
@@ -51,6 +52,7 @@ export default function App() {
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [merchantRules, setMerchantRules] = useState([]);
   const [budgets, setBudgets] = useState([]);
+  const [budgetRecommendations, setBudgetRecommendations] = useState([]);
   const [recurringCharges, setRecurringCharges] = useState([]);
   const [uploads, setUploads] = useState([]);
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
@@ -89,6 +91,7 @@ export default function App() {
         categoryOptionsPayload,
         merchantRulesPayload,
         budgetPayload,
+        budgetRecommendationPayload,
         recurringPayload,
         uploadPayload,
       ] = await Promise.all([
@@ -109,6 +112,7 @@ export default function App() {
         request("/category-options"),
         request("/merchant-rules"),
         request(`/budgets${queryString({ month: activeMonth })}`),
+        request(`/budgets/recommendations${queryString({ month: activeMonth, limit: 6 })}`),
         request("/recurring?limit=6"),
         request("/uploads?limit=6"),
       ]);
@@ -126,6 +130,7 @@ export default function App() {
       setCategoryOptions(categoryOptionsPayload);
       setMerchantRules(merchantRulesPayload);
       setBudgets(budgetPayload);
+      setBudgetRecommendations(budgetRecommendationPayload);
       setRecurringCharges(recurringPayload);
       setUploads(uploadPayload);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
@@ -284,6 +289,33 @@ export default function App() {
     }
   }
 
+  async function handleApplyBudgetRecommendation(recommendation) {
+    const recommendationMonth = recommendation.month || month;
+    if (!recommendationMonth) {
+      setUploadStatus("Choose a month before saving a recommendation.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const budget = await request("/budgets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          month: recommendationMonth,
+          category: recommendation.category,
+          amount: recommendation.recommended_amount,
+        }),
+      });
+      setUploadStatus(`Saved ${budget.month} ${budget.category} budget.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleTransactionFilterChange(name, value) {
     setTransactionFilters((current) => ({ ...current, [name]: value }));
   }
@@ -387,6 +419,15 @@ export default function App() {
             onSubmit={handleBudgetSubmit}
           />
           <BudgetList budgets={budgets} busy={busy} onDelete={handleDeleteBudget} />
+        </section>
+
+        <section className="panel recommendations-panel">
+          <PanelTitle icon={<Lightbulb size={18} />} title="Budget Recommendations" detail={month || "No month"} />
+          <BudgetRecommendationList
+            busy={busy}
+            onApply={handleApplyBudgetRecommendation}
+            recommendations={budgetRecommendations}
+          />
         </section>
 
         <section className="panel recurring-panel">
@@ -607,6 +648,34 @@ function BudgetList({ budgets, busy, onDelete }) {
     <div className="budget-list">
       {budgets.map((budget) => (
         <BudgetRow budget={budget} busy={busy} key={budget.id} onDelete={onDelete} />
+      ))}
+    </div>
+  );
+}
+
+function BudgetRecommendationList({ busy, onApply, recommendations }) {
+  if (!recommendations.length) return <p className="empty">No budget recommendations yet.</p>;
+
+  return (
+    <div className="recommendation-list">
+      {recommendations.map((recommendation) => (
+        <div className={`recommendation-row recommendation-${recommendation.action}`} key={recommendation.category}>
+          <div>
+            <strong>{recommendation.category}</strong>
+            <span>{recommendation.reason}</span>
+            <small>
+              {recommendation.confidence} confidence | {recommendation.history_months} month
+              {recommendation.history_months === 1 ? "" : "s"} history
+            </small>
+          </div>
+          <div className="recommendation-action">
+            <b>{money(recommendation.recommended_amount)}</b>
+            <button disabled={busy} onClick={() => onApply(recommendation)} type="button">
+              <Plus size={15} />
+              Use
+            </button>
+          </div>
+        </div>
       ))}
     </div>
   );

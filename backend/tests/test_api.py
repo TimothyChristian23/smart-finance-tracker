@@ -343,6 +343,27 @@ def test_budget_api_rejects_unknown_category():
     assert "category must be one of" in response.json()["detail"]
 
 
+def test_budget_recommendations_use_history_and_existing_budgets():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+    client.put("/budgets", json={"month": "2026-08", "category": "Other", "amount": 40})
+
+    response = client.get("/budgets/recommendations?month=2026-08")
+
+    assert response.status_code == 200
+    payload = response.json()
+    categories = {item["category"]: item for item in payload}
+    assert set(categories) == {"Other", "Subscriptions"}
+    assert categories["Other"]["recommended_amount"] == 60.0
+    assert categories["Other"]["baseline_average"] == 51.33
+    assert categories["Other"]["recurring_amount"] == 44.67
+    assert categories["Other"]["existing_budget"] == 40.0
+    assert categories["Other"]["difference_from_existing"] == 20.0
+    assert categories["Other"]["action"] == "raise"
+    assert categories["Other"]["confidence"] == "high"
+    assert categories["Subscriptions"]["recommended_amount"] == 20.0
+    assert categories["Subscriptions"]["recurring_amount"] == 15.99
+
+
 def test_monthly_insights_composes_report_signals():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     client.put("/budgets", json={"month": "2026-07", "category": "Housing", "amount": 1200})
@@ -441,6 +462,21 @@ def test_ask_handles_budget_questions():
     assert payload["amount"] == 250.0
     assert payload["categories"] == ["Housing"]
     assert "Housing is $250.00 over" in payload["answer"]
+
+
+def test_ask_handles_budget_recommendation_questions():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    response = client.post("/ask", json={"question": "What budgets do you recommend for August 2026?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "budget_recommendations"
+    assert payload["amount"] == 60.0
+    assert payload["month"] == "2026-08"
+    assert payload["categories"] == ["Other", "Subscriptions"]
+    assert "I recommend starting with Other at $60.00" in payload["answer"]
+    assert payload["data"][0]["action"] == "create"
 
 
 def test_ask_handles_monthly_report_questions():
