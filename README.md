@@ -18,9 +18,10 @@ The first implementation slice focuses on trustworthy analytics:
 - Transaction search, category filtering, and CSV export
 - Monthly spending summaries
 - Monthly insight reports with highlights, risks, and next actions
+- Cash-flow forecasts from imported activity and upcoming recurring charges
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection
-- Deterministic question answering for spending, income, category, merchant, budget, recurring charge, monthly report, largest expense, and anomaly questions
+- Deterministic question answering for spending, income, category, merchant, budget, forecast, recurring charge, monthly report, largest expense, and anomaly questions
 - React dashboard scaffold
 - Locked frontend dependency install and production build
 - GitHub Actions backend test and frontend build workflows
@@ -109,6 +110,7 @@ Useful API endpoints:
 ```text
 GET  /summary?month=2026-07
 GET  /insights/monthly?month=2026-07
+GET  /forecast/monthly?month=2026-08
 GET  /months
 GET  /uploads
 GET  /transactions?month=2026-07&category=Dining&search=coffee
@@ -144,6 +146,10 @@ so it becomes useful after importing a few statements. Upload
 Monthly insight reports combine summary totals, budget progress, recurring charges,
 top merchants, largest expenses, and anomalies into a deterministic snapshot. Ask
 `Give me my monthly report for July 2026` to route the Q&A panel to that same report.
+
+Cash-flow forecasts estimate month-end spending from imported activity and upcoming
+recurring charges. Ask `What am I projected to spend in August 2026?` to get the
+same forecast through the Q&A panel.
 
 ## Notes
 

@@ -27,6 +27,7 @@ from app.database import (
     list_merchant_rules,
     list_transactions,
     list_uploads,
+    monthly_forecast,
     monthly_insights,
     monthly_summary,
     monthly_trends,
@@ -150,6 +151,29 @@ class MonthlyInsightResponse(BaseModel):
     highlights: list[str]
     risks: list[str]
     next_actions: list[str]
+
+
+class CashFlowForecastResponse(BaseModel):
+    month: str | None
+    status: str
+    confidence: str
+    coverage_start_date: str | None = None
+    coverage_end_date: str | None = None
+    days_elapsed: int
+    days_in_month: int
+    remaining_days: int
+    actual_spending: float
+    daily_spending_average: float
+    run_rate_projection: float
+    projected_spending: float
+    projected_income: float
+    projected_net: float
+    budget_total: float
+    budget_remaining: float
+    budget_status: str
+    upcoming_recurring_total: float
+    upcoming_recurring: list[dict]
+    notes: list[str]
 
 
 class AskRequest(BaseModel):
@@ -305,6 +329,11 @@ async def insights(month: str | None = None) -> dict:
     return monthly_insights(month=validate_month(month))
 
 
+@app.get("/forecast/monthly", response_model=CashFlowForecastResponse)
+async def forecast(month: str | None = None) -> dict:
+    return monthly_forecast(month=validate_month(month))
+
+
 @app.get("/months")
 async def months() -> list[dict]:
     return available_months()
@@ -418,6 +447,36 @@ async def ask(request: AskRequest) -> AskResponse:
             month=report["month"],
             intent="monthly_insights",
             data=[report],
+        )
+
+    if looks_like_forecast_question(normalized):
+        forecast_month = month or latest_imported_month()
+        forecast_data = monthly_forecast(month=forecast_month)
+        if forecast_data["month"] is None:
+            return AskResponse(
+                answer="I do not have enough transaction data to build a forecast yet.",
+                intent="monthly_forecast",
+                data=[forecast_data],
+            )
+
+        recurring_text = ""
+        if forecast_data["upcoming_recurring_total"]:
+            recurring_text = (
+                f" Upcoming recurring charges add "
+                f"{format_money(forecast_data['upcoming_recurring_total'])}."
+            )
+
+        return AskResponse(
+            answer=(
+                f"For {format_month_label(forecast_data['month'])}, projected spending is "
+                f"{format_money(forecast_data['projected_spending'])}. "
+                f"Projected net cash flow is {format_money(forecast_data['projected_net'])}."
+                f"{recurring_text}"
+            ),
+            amount=forecast_data["projected_spending"],
+            month=forecast_data["month"],
+            intent="monthly_forecast",
+            data=[forecast_data],
         )
 
     if has_any(normalized, ["budget", "budgets"]):
@@ -610,8 +669,8 @@ async def ask(request: AskRequest) -> AskResponse:
         return AskResponse(
             answer=(
                 "I can answer spending, income, net cash flow, category, merchant, "
-                "budget, recurring charge, upload history, monthly report, largest expense, "
-                "and anomaly questions."
+                "budget, forecast, recurring charge, upload history, monthly report, "
+                "largest expense, and anomaly questions."
             ),
             month=month,
         )
@@ -900,6 +959,13 @@ def looks_like_monthly_report_question(question: str) -> bool:
     return (
         has_any(question, ["report", "insight", "insights", "overview", "checkup", "recap"])
         and has_any(question, ["month", "monthly", "spending", "finance", "financial"])
+    )
+
+
+def looks_like_forecast_question(question: str) -> bool:
+    return (
+        has_any(question, ["forecast", "project", "projected", "projection", "pace", "run rate", "expected"])
+        or "rest of the month" in question
     )
 
 

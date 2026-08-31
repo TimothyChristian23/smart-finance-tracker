@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   BarChart3,
   BookmarkPlus,
+  CalendarClock,
   ClipboardList,
   CircleDollarSign,
   Download,
@@ -39,6 +40,7 @@ export default function App() {
   const [health, setHealth] = useState("Checking");
   const [summary, setSummary] = useState(emptySummary());
   const [insights, setInsights] = useState(emptyInsights());
+  const [forecast, setForecast] = useState(emptyForecast());
   const [transactions, setTransactions] = useState([]);
   const [anomalies, setAnomalies] = useState([]);
   const [months, setMonths] = useState([]);
@@ -77,6 +79,7 @@ export default function App() {
       const [
         summaryPayload,
         insightPayload,
+        forecastPayload,
         transactionPayload,
         anomalyPayload,
         categoryPayload,
@@ -91,6 +94,7 @@ export default function App() {
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
         request(`/insights/monthly${queryString({ month: activeMonth })}`),
+        request(`/forecast/monthly${queryString({ month: activeMonth })}`),
         request(`/transactions${queryString({
           month: activeMonth,
           category: transactionFilters.category,
@@ -112,6 +116,7 @@ export default function App() {
       setMonths(monthsPayload);
       setSummary(summaryPayload);
       setInsights(insightPayload);
+      setForecast(forecastPayload);
       setTransactions(transactionPayload);
       setAnomalies(anomalyPayload);
       setCategories(categoryPayload);
@@ -367,6 +372,11 @@ export default function App() {
           <InsightList insights={insights} />
         </section>
 
+        <section className="panel forecast-panel">
+          <PanelTitle icon={<CalendarClock size={18} />} title="Cash Flow Forecast" detail={forecast.month || selectedMonthLabel} />
+          <ForecastSummary forecast={forecast} />
+        </section>
+
         <section className="panel budget-panel">
           <PanelTitle icon={<Target size={18} />} title="Budgets" detail={month || "No month"} />
           <BudgetForm
@@ -529,6 +539,29 @@ function InsightList({ insights }) {
           <p>{row.text}</p>
         </div>
       ))}
+    </div>
+  );
+}
+
+function ForecastSummary({ forecast }) {
+  if (!forecast.month) return <p className="empty">No forecast yet.</p>;
+
+  return (
+    <div className="forecast-summary">
+      <div className="forecast-main">
+        <span>Projected Spending</span>
+        <strong>{money(forecast.projected_spending)}</strong>
+      </div>
+      <div className="forecast-stats">
+        <span>{forecast.confidence} confidence</span>
+        <span>{forecast.remaining_days} days remaining</span>
+        <span>{forecast.status.replaceAll("_", " ")}</span>
+      </div>
+      <div className="forecast-notes">
+        {(forecast.notes || []).slice(0, 4).map((note) => (
+          <p key={note}>{note}</p>
+        ))}
+      </div>
     </div>
   );
 }
@@ -821,6 +854,31 @@ function emptyInsights() {
     highlights: [],
     risks: [],
     next_actions: [],
+  };
+}
+
+function emptyForecast() {
+  return {
+    month: null,
+    status: "no_data",
+    confidence: "low",
+    coverage_start_date: null,
+    coverage_end_date: null,
+    days_elapsed: 0,
+    days_in_month: 0,
+    remaining_days: 0,
+    actual_spending: 0,
+    daily_spending_average: 0,
+    run_rate_projection: 0,
+    projected_spending: 0,
+    projected_income: 0,
+    projected_net: 0,
+    budget_total: 0,
+    budget_remaining: 0,
+    budget_status: "no_budget",
+    upcoming_recurring_total: 0,
+    upcoming_recurring: [],
+    notes: [],
   };
 }
 

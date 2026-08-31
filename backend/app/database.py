@@ -769,6 +769,96 @@ def monthly_insights(month: str | None = None) -> dict:
     }
 
 
+def monthly_forecast(month: str | None = None) -> dict:
+    """Project month-end spending from imported activity and expected recurring charges."""
+    forecast_month = month or _latest_month()
+    if forecast_month is None:
+        return {
+            "month": None,
+            "status": "no_data",
+            "confidence": "low",
+            "coverage_start_date": None,
+            "coverage_end_date": None,
+            "days_elapsed": 0,
+            "days_in_month": 0,
+            "remaining_days": 0,
+            "actual_spending": 0,
+            "daily_spending_average": 0,
+            "run_rate_projection": 0,
+            "projected_spending": 0,
+            "projected_income": 0,
+            "projected_net": 0,
+            "budget_total": 0,
+            "budget_remaining": 0,
+            "budget_status": "no_budget",
+            "upcoming_recurring_total": 0,
+            "upcoming_recurring": [],
+            "notes": ["Upload transactions to build a cash-flow forecast."],
+        }
+
+    summary = monthly_summary(month=forecast_month)
+    budgets = budget_progress(forecast_month)
+    start_date, end_date = _month_bounds(forecast_month)
+    latest_date_text = _latest_transaction_date(forecast_month)
+    coverage_date = date.fromisoformat(latest_date_text) if latest_date_text else None
+    days_in_month = (end_date - start_date).days
+    days_elapsed = 0
+    if coverage_date:
+        clamped_date = min(max(coverage_date, start_date), end_date - timedelta(days=1))
+        days_elapsed = (clamped_date - start_date).days + 1
+
+    remaining_days = max(0, days_in_month - days_elapsed)
+    daily_average = round(summary["total_spending"] / days_elapsed, 2) if days_elapsed else 0
+    run_rate_projection = round(daily_average * days_in_month, 2) if days_elapsed else 0
+    upcoming_recurring = _upcoming_recurring_charges(forecast_month, coverage_date)
+    upcoming_recurring_total = round(sum(item["average_amount"] for item in upcoming_recurring), 2)
+    projected_spending = round(
+        max(summary["total_spending"], run_rate_projection + upcoming_recurring_total),
+        2,
+    )
+    projected_income = summary["total_income"]
+    projected_net = round(projected_income - projected_spending, 2)
+
+    over_budgets = [item for item in budgets if item["status"] == "over"]
+    near_budgets = [item for item in budgets if item["status"] == "near"]
+    budget_total = round(sum(item["amount"] for item in budgets), 2)
+    budget_remaining = round(sum(item["remaining"] for item in budgets), 2)
+    budget_status = _forecast_budget_status(budgets, over_budgets, near_budgets)
+    status = _forecast_status(projected_net, budget_status, projected_spending)
+    confidence = _forecast_confidence(days_elapsed, days_in_month, summary["transaction_count"])
+    notes = _forecast_notes(
+        forecast_month=forecast_month,
+        coverage_date=coverage_date,
+        projected_spending=projected_spending,
+        projected_net=projected_net,
+        upcoming_recurring_total=upcoming_recurring_total,
+        budget_status=budget_status,
+    )
+
+    return {
+        "month": forecast_month,
+        "status": status,
+        "confidence": confidence,
+        "coverage_start_date": start_date.isoformat(),
+        "coverage_end_date": coverage_date.isoformat() if coverage_date else None,
+        "days_elapsed": days_elapsed,
+        "days_in_month": days_in_month,
+        "remaining_days": remaining_days,
+        "actual_spending": summary["total_spending"],
+        "daily_spending_average": daily_average,
+        "run_rate_projection": run_rate_projection,
+        "projected_spending": projected_spending,
+        "projected_income": projected_income,
+        "projected_net": projected_net,
+        "budget_total": budget_total,
+        "budget_remaining": budget_remaining,
+        "budget_status": budget_status,
+        "upcoming_recurring_total": upcoming_recurring_total,
+        "upcoming_recurring": upcoming_recurring,
+        "notes": notes,
+    }
+
+
 def spending_for_categories(categories: list[str], month: str | None = None) -> int:
     """Return spending cents for the requested categories."""
     if not categories:
@@ -929,6 +1019,104 @@ def _previous_month(month: str) -> str:
     return f"{current.year}-{current.month - 1:02d}"
 
 
+def _month_bounds(month: str) -> tuple[date, date]:
+    start = date.fromisoformat(f"{month}-01")
+    if start.month == 12:
+        return start, date(start.year + 1, 1, 1)
+    return start, date(start.year, start.month + 1, 1)
+
+
+def _latest_transaction_date(month: str) -> str | None:
+    where_sql, params = _month_filter(month)
+    with connect() as conn:
+        row = conn.execute(
+            f"""
+            SELECT MAX(transaction_date) AS latest_date
+            FROM transactions
+            {where_sql}
+            """,
+            params,
+        ).fetchone()
+    return row["latest_date"] if row else None
+
+
+def _upcoming_recurring_charges(month: str, coverage_date: date | None) -> list[dict]:
+    start_date, end_date = _month_bounds(month)
+    cutoff = coverage_date or (start_date - timedelta(days=1))
+    charges = []
+    for charge in recurring_charges(limit=100):
+        expected_date = date.fromisoformat(charge["next_expected_date"])
+        if start_date <= expected_date < end_date and expected_date > cutoff:
+            charges.append(charge)
+    return sorted(charges, key=lambda item: item["next_expected_date"])
+
+
+def _forecast_budget_status(
+    budgets: list[dict],
+    over_budgets: list[dict],
+    near_budgets: list[dict],
+) -> str:
+    if not budgets:
+        return "no_budget"
+    if over_budgets:
+        return "over_budget"
+    if near_budgets:
+        return "near_budget"
+    return "on_track"
+
+
+def _forecast_status(projected_net: float, budget_status: str, projected_spending: float) -> str:
+    if projected_spending <= 0:
+        return "no_data"
+    if projected_net < 0:
+        return "negative_cash_flow"
+    if budget_status == "over_budget":
+        return "over_budget"
+    if budget_status == "near_budget":
+        return "near_budget"
+    return "on_track"
+
+
+def _forecast_confidence(days_elapsed: int, days_in_month: int, transaction_count: int) -> str:
+    if not days_elapsed or not transaction_count:
+        return "low"
+
+    coverage_ratio = days_elapsed / max(days_in_month, 1)
+    if coverage_ratio >= 0.75 and transaction_count >= 8:
+        return "high"
+    if coverage_ratio >= 0.35 and transaction_count >= 3:
+        return "medium"
+    return "low"
+
+
+def _forecast_notes(
+    forecast_month: str,
+    coverage_date: date | None,
+    projected_spending: float,
+    projected_net: float,
+    upcoming_recurring_total: float,
+    budget_status: str,
+) -> list[str]:
+    notes = []
+    if coverage_date:
+        notes.append(f"Projection uses imported activity through {coverage_date.isoformat()}.")
+    else:
+        notes.append(f"No imported transactions for {forecast_month}; projection uses known recurring charges.")
+    notes.append(f"Projected spending is {_format_money(projected_spending)}.")
+    notes.append(f"Projected net cash flow is {_format_money(projected_net)}.")
+    if upcoming_recurring_total:
+        notes.append(f"Upcoming recurring charges add {_format_money(upcoming_recurring_total)}.")
+    if budget_status == "no_budget":
+        notes.append("No budgets are set for this month.")
+    elif budget_status == "over_budget":
+        notes.append("At least one budget category is already over its target.")
+    elif budget_status == "near_budget":
+        notes.append("At least one budget category is near its target.")
+    else:
+        notes.append("Budget categories are currently on track.")
+    return notes[:5]
+
+
 def _monthly_highlights(
     summary: dict,
     top_category: dict | None,
@@ -1029,11 +1217,7 @@ def _month_filter(month: str | None) -> tuple[str, list[str]]:
     if not month:
         return "", []
 
-    start = date.fromisoformat(f"{month}-01")
-    if start.month == 12:
-        end = date(start.year + 1, 1, 1)
-    else:
-        end = date(start.year, start.month + 1, 1)
+    start, end = _month_bounds(month)
 
     return (
         "WHERE transaction_date >= ? AND transaction_date < ?",

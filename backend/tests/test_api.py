@@ -363,6 +363,27 @@ def test_monthly_insights_composes_report_signals():
     assert any("Review over-budget categories: Housing." == item for item in payload["next_actions"])
 
 
+def test_monthly_forecast_projects_upcoming_recurring_charges():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    response = client.get("/forecast/monthly?month=2026-08")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["month"] == "2026-08"
+    assert payload["status"] == "negative_cash_flow"
+    assert payload["confidence"] == "low"
+    assert payload["actual_spending"] == 0
+    assert payload["projected_spending"] == 60.66
+    assert payload["projected_net"] == -60.66
+    assert payload["upcoming_recurring_total"] == 60.66
+    assert {item["merchant"] for item in payload["upcoming_recurring"]} == {
+        "Gym Membership",
+        "Netflix Subscription",
+    }
+    assert "Upcoming recurring charges add $60.66." in payload["notes"]
+
+
 def test_recurring_endpoint_detects_monthly_charges():
     client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
 
@@ -437,6 +458,21 @@ def test_ask_handles_monthly_report_questions():
     assert "For 2026-07, you spent $2,840.87" in payload["answer"]
     assert "Housing is $250.00 over budget." in payload["answer"]
     assert payload["data"][0]["top_category"]["category"] == "Housing"
+
+
+def test_ask_handles_forecast_questions():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    response = client.post("/ask", json={"question": "What am I projected to spend in August 2026?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "monthly_forecast"
+    assert payload["amount"] == 60.66
+    assert payload["month"] == "2026-08"
+    assert "projected spending is $60.66" in payload["answer"]
+    assert "Upcoming recurring charges add $60.66." in payload["answer"]
+    assert payload["data"][0]["upcoming_recurring_total"] == 60.66
 
 
 def test_ask_handles_upload_history_questions():
