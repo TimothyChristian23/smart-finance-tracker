@@ -23,6 +23,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection
 - Deterministic question answering for spending, income, category, merchant, budget, budget recommendation, forecast, recurring charge, monthly report, largest expense, and anomaly questions
+- RAG-style broad Q&A with cited transaction and summary evidence
 - React dashboard scaffold
 - Locked frontend dependency install and production build
 - GitHub Actions backend test and frontend build workflows
@@ -104,6 +105,7 @@ Upload `data/sample_transactions.csv` through the frontend or API. Then ask:
 
 ```text
 How much did I spend on food last month?
+Tell me about Amazon in July 2026
 ```
 
 Useful API endpoints:
@@ -156,6 +158,9 @@ same forecast through the Q&A panel.
 Budget recommendations use recent category spending and upcoming recurring charges
 to suggest starting targets. Ask `What budgets do you recommend for August 2026?`
 or apply a recommendation directly from the dashboard.
+
+Broad Q&A questions retrieve relevant transaction evidence and return citations in
+the answer card. Exact totals still come from deterministic database calculations.
 
 ## Notes
 

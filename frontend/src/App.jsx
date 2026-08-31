@@ -781,10 +781,25 @@ function RuleList({ rules, busy, onDelete }) {
 }
 
 function AnswerCard({ answer }) {
+  const citations = answer.citations || [];
+
   return (
     <div className="answer">
       <strong>{answer.answer}</strong>
       {!!answer.categories?.length && <span>{answer.categories.join(" + ")}</span>}
+      {!!citations.length && (
+        <div className="citation-list">
+          {citations.map((citation) => (
+            <div className="citation-row" key={citation.id}>
+              <div>
+                <b>{citation.title}</b>
+                <span>{citation.detail}</span>
+              </div>
+              {citation.amount !== null && citation.amount !== undefined && <strong>{money(citation.amount)}</strong>}
+            </div>
+          ))}
+        </div>
+      )}
       {!!answer.data?.length && <small>{answer.data.length} supporting result{answer.data.length === 1 ? "" : "s"}</small>}
     </div>
   );

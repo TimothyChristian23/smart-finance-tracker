@@ -364,6 +364,46 @@ h2 {
   font-weight: 800;
 }
 
+.citation-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.citation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(36, 120, 106, 0.18);
+  background: #fff;
+  padding: 8px;
+}
+
+.citation-row b,
+.citation-row span {
+  display: block;
+}
+
+.citation-row b {
+  color: var(--ink);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.citation-row span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.citation-row strong {
+  color: var(--accent-dark);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
 .list {
   display: grid;
   gap: 8px;

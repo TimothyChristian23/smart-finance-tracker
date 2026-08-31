@@ -31,6 +31,7 @@ from app.database import (
     monthly_forecast,
     monthly_insights,
     monthly_summary,
+    question_evidence,
     monthly_trends,
     record_upload,
     recurring_charges,
@@ -202,6 +203,7 @@ class AskResponse(BaseModel):
     month: str | None = None
     intent: str = "unknown"
     data: list[dict] = Field(default_factory=list)
+    citations: list[dict] = Field(default_factory=list)
 
 
 MONTH_ALIASES = {
@@ -699,6 +701,11 @@ async def ask(request: AskRequest) -> AskResponse:
             data=[summary_data],
         )
 
+    if looks_like_contextual_question(normalized):
+        evidence_answer = answer_from_evidence(question, month=month, require_match=False)
+        if evidence_answer:
+            return evidence_answer
+
     if not categories:
         if re.search(r"\bspend\b|\bspent\b|\bspending\b|\bexpenses?\b", normalized):
             summary_data = monthly_summary(month=month)
@@ -711,11 +718,15 @@ async def ask(request: AskRequest) -> AskResponse:
                 data=[summary_data],
             )
 
+        evidence_answer = answer_from_evidence(question, month=month, require_match=True)
+        if evidence_answer:
+            return evidence_answer
+
         return AskResponse(
             answer=(
                 "I can answer spending, income, net cash flow, category, merchant, "
                 "budget, forecast, recurring charge, upload history, monthly report, "
-                "largest expense, and anomaly questions."
+                "largest expense, anomaly, and cited evidence questions."
             ),
             month=month,
         )
@@ -970,6 +981,83 @@ def validate_search(search: str | None) -> str | None:
     return normalized
 
 
+def answer_from_evidence(question: str, month: str | None = None, require_match: bool = False) -> AskResponse | None:
+    context = question_evidence(question, month=month, limit=6)
+    summary_data = context["summary"]
+    if context["month"] is None or not summary_data["transaction_count"]:
+        return None
+    if require_match and not context["matches"]:
+        return None
+
+    answer = compose_evidence_answer(question, context)
+    if context["matches"]:
+        categories = list(dict.fromkeys(item["category"] for item in context["matches"]))
+    else:
+        categories = [item["category"] for item in context["top_categories"][:3]]
+    amount = sum(abs(item["amount"]) for item in context["matches"]) if context["matches"] else summary_data["total_spending"]
+    return AskResponse(
+        answer=answer,
+        amount=round(amount, 2),
+        categories=categories,
+        month=context["month"],
+        intent="evidence_answer",
+        data=context["matches"],
+        citations=context["citations"],
+    )
+
+
+def compose_evidence_answer(question: str, context: dict) -> str:
+    normalized = question.lower()
+    month_label = format_month_label(context["month"])
+    summary_data = context["summary"]
+    matches = context["matches"]
+    top_categories = context["top_categories"]
+    top_merchants_list = context["top_merchants"]
+    anomalies = context["anomalies"]
+
+    if matches:
+        total = sum(abs(item["amount"]) for item in matches)
+        lead = max(matches, key=lambda item: abs(item["amount"]))
+        return (
+            f"I found {len(matches)} relevant transaction"
+            f"{'' if len(matches) == 1 else 's'} for {month_label} totaling "
+            f"{format_money(total)}. The largest match is {lead['description']} "
+            f"at {format_money(abs(lead['amount']))} in {lead['category']}."
+        )
+
+    lead_category = top_categories[0] if top_categories else None
+    lead_merchant = top_merchants_list[0] if top_merchants_list else None
+    if "why" in normalized or "explain" in normalized:
+        driver = (
+            f"{lead_category['category']} led categories at {format_money(lead_category['total'])}"
+            if lead_category
+            else f"spending totaled {format_money(summary_data['total_spending'])}"
+        )
+        merchant_text = (
+            f", with {lead_merchant['merchant']} as the top merchant at {format_money(lead_merchant['total'])}"
+            if lead_merchant
+            else ""
+        )
+        anomaly_text = f" I also found {len(anomalies)} unusual charge(s)." if anomalies else ""
+        return f"For {month_label}, {driver}{merchant_text}.{anomaly_text}"
+
+    category_text = (
+        f" Top category: {lead_category['category']} at {format_money(lead_category['total'])}."
+        if lead_category
+        else ""
+    )
+    merchant_text = (
+        f" Top merchant: {lead_merchant['merchant']} at {format_money(lead_merchant['total'])}."
+        if lead_merchant
+        else ""
+    )
+    return (
+        f"For {month_label}, spending was {format_money(summary_data['total_spending'])}, "
+        f"income was {format_money(summary_data['total_income'])}, and net cash flow was "
+        f"{format_money(summary_data['net'])}.{category_text}{merchant_text}"
+    )
+
+
 def latest_imported_month() -> str | None:
     months = available_months()
     return months[0]["month"] if months else None
@@ -1011,6 +1099,13 @@ def looks_like_forecast_question(question: str) -> bool:
     return (
         has_any(question, ["forecast", "project", "projected", "projection", "pace", "run rate", "expected"])
         or "rest of the month" in question
+    )
+
+
+def looks_like_contextual_question(question: str) -> bool:
+    return (
+        has_any(question, ["why", "explain", "pattern", "patterns", "stand out", "stood out", "tell me about"])
+        or has_any(question, ["evidence", "cite", "cited", "supporting", "related"])
     )
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
@@ -11,6 +12,56 @@ from dotenv import load_dotenv
 from app.categorization import normalize_text
 
 load_dotenv()
+
+QUESTION_STOPWORDS = {
+    "about",
+    "after",
+    "again",
+    "against",
+    "also",
+    "any",
+    "are",
+    "because",
+    "before",
+    "between",
+    "can",
+    "could",
+    "did",
+    "does",
+    "for",
+    "from",
+    "give",
+    "had",
+    "have",
+    "high",
+    "how",
+    "into",
+    "last",
+    "look",
+    "month",
+    "monthly",
+    "more",
+    "much",
+    "over",
+    "show",
+    "spend",
+    "spending",
+    "spent",
+    "tell",
+    "than",
+    "that",
+    "the",
+    "this",
+    "was",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with",
+    "why",
+    "you",
+}
 
 
 def get_db_path() -> Path:
@@ -920,6 +971,38 @@ def budget_recommendations(month: str | None = None, limit: int = 8) -> list[dic
     )[:limit]
 
 
+def question_evidence(question: str, month: str | None = None, limit: int = 6) -> dict:
+    """Retrieve cited transaction and aggregate context for broad Q&A."""
+    evidence_month = month or _latest_month()
+    if evidence_month is None:
+        return {
+            "month": None,
+            "summary": monthly_summary(month=None),
+            "matches": [],
+            "citations": [],
+            "top_categories": [],
+            "top_merchants": [],
+            "anomalies": [],
+        }
+
+    summary = monthly_summary(month=evidence_month)
+    top_categories = category_totals(month=evidence_month)[:5]
+    top_merchants_list = top_merchants(month=evidence_month, limit=5)
+    anomalies = detect_anomalies(limit=3, month=evidence_month)
+    matches = _rank_question_transactions(question, evidence_month, limit)
+    citations = _question_citations(summary, top_categories, top_merchants_list, anomalies, matches)
+
+    return {
+        "month": evidence_month,
+        "summary": summary,
+        "matches": matches,
+        "citations": citations,
+        "top_categories": top_categories,
+        "top_merchants": top_merchants_list,
+        "anomalies": anomalies,
+    }
+
+
 def spending_for_categories(categories: list[str], month: str | None = None) -> int:
     """Return spending cents for the requested categories."""
     if not categories:
@@ -1274,6 +1357,137 @@ def _budget_recommendation_reason(
         gap = cents_to_dollars(recommended_cents - existing_cents)
         return f"{reason} Existing budget is {_format_money(gap)} below the suggestion."
     return reason
+
+
+def _question_tokens(question: str) -> list[str]:
+    normalized = normalize_text(question)
+    tokens = []
+    for token in re.findall(r"[a-z0-9][a-z0-9&'-]*", normalized):
+        if len(token) < 3 or token in QUESTION_STOPWORDS or re.fullmatch(r"20\d{2}", token):
+            continue
+        tokens.append(token)
+    return list(dict.fromkeys(tokens))
+
+
+def _rank_question_transactions(question: str, month: str, limit: int) -> list[dict]:
+    tokens = _question_tokens(question)
+    where_sql, params = _month_filter(month)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, transaction_date, description, amount_cents, category, source_file
+            FROM transactions
+            {where_sql}
+            ORDER BY ABS(amount_cents) DESC, transaction_date DESC
+            LIMIT 500
+            """,
+            params,
+        ).fetchall()
+
+    scored = []
+    for row in rows:
+        score = _transaction_question_score(row, tokens, question)
+        if score <= 0:
+            continue
+        item = _transaction_row_to_dict(row)
+        item["score"] = score
+        scored.append(item)
+
+    return sorted(scored, key=lambda item: (item["score"], abs(item["amount"])), reverse=True)[:limit]
+
+
+def _transaction_question_score(row: sqlite3.Row, tokens: list[str], question: str) -> int:
+    if not tokens:
+        return 0
+
+    normalized_question = normalize_text(question)
+    description = normalize_text(row["description"])
+    category = normalize_text(row["category"])
+    source_file = normalize_text(row["source_file"] or "")
+    score = 0
+    for token in tokens:
+        if token in description:
+            score += 4
+        if token in category:
+            score += 3
+        if token in source_file:
+            score += 1
+
+    if description and description in normalized_question:
+        score += 6
+    if int(row["amount_cents"]) < 0 and any(term in normalized_question for term in ["expense", "charge", "purchase"]):
+        score += 1
+    if int(row["amount_cents"]) > 0 and any(term in normalized_question for term in ["income", "deposit", "payroll"]):
+        score += 3
+    return score
+
+
+def _question_citations(
+    summary: dict,
+    top_categories: list[dict],
+    top_merchants_list: list[dict],
+    anomalies: list[dict],
+    matches: list[dict],
+) -> list[dict]:
+    citations = [
+        {
+            "id": f"summary-{summary['month'] or 'all'}",
+            "type": "summary",
+            "title": f"{summary['month'] or 'All data'} summary",
+            "detail": (
+                f"{_format_money(summary['total_spending'])} spending, "
+                f"{_format_money(summary['total_income'])} income, "
+                f"{_format_money(summary['net'])} net"
+            ),
+            "amount": summary["total_spending"],
+            "date": None,
+            "category": None,
+        }
+    ]
+    if top_categories:
+        top_category = top_categories[0]
+        citations.append({
+            "id": f"category-{summary['month']}-{top_category['category']}",
+            "type": "category",
+            "title": top_category["category"],
+            "detail": f"{top_category['transaction_count']} transactions",
+            "amount": top_category["total"],
+            "date": None,
+            "category": top_category["category"],
+        })
+    if top_merchants_list:
+        merchant = top_merchants_list[0]
+        citations.append({
+            "id": f"merchant-{summary['month']}-{merchant['merchant']}",
+            "type": "merchant",
+            "title": merchant["merchant"],
+            "detail": f"{merchant['category']} merchant total",
+            "amount": merchant["total"],
+            "date": None,
+            "category": merchant["category"],
+        })
+    if anomalies:
+        anomaly = anomalies[0]
+        citations.append({
+            "id": f"anomaly-{anomaly['id']}",
+            "type": "anomaly",
+            "title": anomaly["description"],
+            "detail": anomaly["reason"],
+            "amount": abs(anomaly["amount"]),
+            "date": anomaly["date"],
+            "category": anomaly["category"],
+        })
+    for transaction in matches:
+        citations.append({
+            "id": f"transaction-{transaction['id']}",
+            "type": "transaction",
+            "title": transaction["description"],
+            "detail": f"{transaction['date']} | {transaction['category']}",
+            "amount": transaction["amount"],
+            "date": transaction["date"],
+            "category": transaction["category"],
+        })
+    return citations[:8]
 
 
 def _monthly_highlights(

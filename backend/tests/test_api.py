@@ -511,6 +511,39 @@ def test_ask_handles_forecast_questions():
     assert payload["data"][0]["upcoming_recurring_total"] == 60.66
 
 
+def test_ask_returns_cited_evidence_for_broad_questions():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.post("/ask", json={"question": "Tell me about Amazon in July 2026"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "evidence_answer"
+    assert payload["amount"] == 65.2
+    assert payload["month"] == "2026-07"
+    assert payload["data"][0]["description"] == "Amazon Marketplace"
+    assert "I found 1 relevant transaction" in payload["answer"]
+    assert any(citation["type"] == "summary" for citation in payload["citations"])
+    assert any(citation["title"] == "Amazon Marketplace" for citation in payload["citations"])
+
+
+def test_ask_explains_contextual_category_questions_with_evidence():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.post("/ask", json={"question": "Why was shopping high in July 2026?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "evidence_answer"
+    assert payload["amount"] == 964.2
+    assert payload["categories"] == ["Shopping"]
+    assert {item["description"] for item in payload["data"]} == {
+        "Amazon Marketplace",
+        "One-Time Electronics Store",
+    }
+    assert any(citation["title"] == "One-Time Electronics Store" for citation in payload["citations"])
+
+
 def test_ask_handles_upload_history_questions():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
 
