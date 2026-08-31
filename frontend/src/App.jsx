@@ -8,6 +8,7 @@ import {
   ClipboardList,
   CircleDollarSign,
   Download,
+  Eye,
   FileUp,
   History,
   Lightbulb,
@@ -61,6 +62,7 @@ export default function App() {
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
   const [transactionFilters, setTransactionFilters] = useState({ category: "", search: "" });
   const [month, setMonth] = useState("");
+  const [uploadPreview, setUploadPreview] = useState(null);
   const [uploadStatus, setUploadStatus] = useState("");
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [answer, setAnswer] = useState(null);
@@ -172,9 +174,37 @@ export default function App() {
       setUploadStatus(skipped
         ? `Imported ${payload.imported} transactions and skipped ${skipped} duplicates from ${payload.filename}.`
         : `Imported ${payload.imported} transactions from ${payload.filename}.`);
+      setUploadPreview(null);
       event.currentTarget.reset();
       await refreshDashboard();
     } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePreviewUpload(event) {
+    const file = event.currentTarget.form.elements.statement.files[0];
+    if (!file) {
+      setUploadStatus("Choose a statement file first.");
+      return;
+    }
+
+    setBusy(true);
+    setUploadStatus("Previewing statement...");
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const preview = await request("/transactions/preview", {
+        method: "POST",
+        body: formData,
+      });
+      setUploadPreview(preview);
+      setUploadStatus(`Previewed ${preview.row_count} rows from ${preview.filename}.`);
+    } catch (error) {
+      setUploadPreview(null);
       setUploadStatus(error.message);
     } finally {
       setBusy(false);
@@ -210,6 +240,7 @@ export default function App() {
       setUploadStatus("Transactions cleared.");
       setAnswer(null);
       setMonth("");
+      setUploadPreview(null);
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -457,9 +488,13 @@ export default function App() {
         <section className="panel action-panel">
           <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV/PDF" />
           <form className="upload-form" onSubmit={handleUpload}>
-            <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" />
+            <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={() => setUploadPreview(null)} />
             <div className="button-row">
-              <button type="submit" disabled={busy}>Upload Statement</button>
+              <button className="ghost-button" type="button" disabled={busy} onClick={handlePreviewUpload}>
+                <Eye size={16} />
+                Preview
+              </button>
+              <button type="submit" disabled={busy}>Import</button>
               <button className="ghost-button" type="button" disabled={busy || !transactions.length} onClick={handleClear}>
                 <Trash2 size={16} />
                 Clear
@@ -467,6 +502,7 @@ export default function App() {
             </div>
           </form>
           {uploadStatus && <p className="helper-text">{uploadStatus}</p>}
+          {uploadPreview && <ImportPreview preview={uploadPreview} />}
         </section>
 
         <section className="panel uploads-panel">
@@ -797,6 +833,29 @@ function UploadHistoryList({ uploads }) {
           <b>{upload.imported_count}</b>
         </div>
       ))}
+    </div>
+  );
+}
+
+function ImportPreview({ preview }) {
+  return (
+    <div className="import-preview">
+      <div className="preview-metrics">
+        <span>{preview.importable_count} importable</span>
+        <span>{preview.duplicate_count} duplicates</span>
+        <span>{money(preview.total_spending)} spending</span>
+      </div>
+      <div className="preview-rows">
+        {preview.rows.slice(0, 5).map((row, index) => (
+          <div className={`preview-row ${row.duplicate ? "preview-duplicate" : ""}`} key={`${row.date}-${row.description}-${index}`}>
+            <div>
+              <strong>{row.description}</strong>
+              <span>{row.date} | {row.category}</span>
+            </div>
+            <b>{money(row.amount)}</b>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

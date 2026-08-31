@@ -66,6 +66,39 @@ def test_upload_transactions_and_monthly_summary():
     assert payload["categories"][0] == {"category": "Housing", "total": 1450.0}
 
 
+def test_preview_transactions_does_not_import_and_marks_duplicates():
+    response = client.post(
+        "/transactions/preview",
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filename"] == "sample.csv"
+    assert payload["file_type"] == "csv"
+    assert payload["row_count"] == 11
+    assert payload["importable_count"] == 11
+    assert payload["duplicate_count"] == 0
+    assert payload["first_transaction_date"] == "2026-07-01"
+    assert payload["last_transaction_date"] == "2026-07-29"
+    assert payload["total_spending"] == 2840.87
+    assert payload["total_income"] == 3200.0
+    assert payload["rows"][0]["description"] == "Payroll Deposit"
+    assert payload["rows"][0]["duplicate"] is False
+
+    empty_summary = client.get("/summary?month=2026-07").json()
+    assert empty_summary["transaction_count"] == 0
+
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    duplicate_preview = client.post(
+        "/transactions/preview",
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    ).json()
+    assert duplicate_preview["importable_count"] == 0
+    assert duplicate_preview["duplicate_count"] == 11
+    assert all(row["duplicate"] for row in duplicate_preview["rows"])
+
+
 def test_duplicate_upload_skips_existing_transactions():
     first = client.post(
         "/transactions/upload",

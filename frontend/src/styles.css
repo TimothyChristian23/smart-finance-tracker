@@ -324,7 +324,7 @@ h2 {
 
 .button-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -401,6 +401,70 @@ h2 {
 .citation-row strong {
   color: var(--accent-dark);
   font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.import-preview {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.preview-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.preview-metrics span {
+  display: grid;
+  min-height: 38px;
+  place-items: center;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.preview-rows {
+  display: grid;
+  gap: 7px;
+}
+
+.preview-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 54px;
+  border: 1px solid var(--line);
+  padding: 9px;
+}
+
+.preview-duplicate {
+  border-left: 4px solid var(--warn);
+}
+
+.preview-row strong,
+.preview-row span {
+  display: block;
+}
+
+.preview-row strong {
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.preview-row span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.preview-row b {
+  color: var(--ink);
+  font-size: 0.86rem;
   white-space: nowrap;
 }
 
@@ -939,6 +1003,10 @@ h2 {
   }
 
   .button-row {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-metrics {
     grid-template-columns: 1fr;
   }
 

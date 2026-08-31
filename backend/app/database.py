@@ -201,6 +201,98 @@ def insert_transactions(rows: list[dict]) -> dict:
     return result
 
 
+def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
+    """Return normalized import rows, totals, and duplicate estimates without saving."""
+    if not rows:
+        return {
+            "row_count": 0,
+            "importable_count": 0,
+            "duplicate_count": 0,
+            "first_transaction_date": None,
+            "last_transaction_date": None,
+            "total_spending": 0,
+            "total_income": 0,
+            "net": 0,
+            "categories": [],
+            "rows": [],
+            "errors": [],
+        }
+
+    preview_rows = []
+    category_totals_cents: dict[str, dict] = {}
+    spending_cents = 0
+    income_cents = 0
+    net_cents = 0
+    duplicate_count = 0
+
+    with connect() as conn:
+        for row in rows:
+            category = merchant_rule_for_description(conn, row["description"]) or row["category"]
+            amount_cents = int(row["amount_cents"])
+            source_file = row.get("source_file")
+            duplicate = transaction_exists(
+                conn,
+                (
+                    row["date"],
+                    row["description"],
+                    amount_cents,
+                    category,
+                    source_file,
+                ),
+            )
+            if duplicate:
+                duplicate_count += 1
+
+            if amount_cents < 0:
+                spending_cents += abs(amount_cents)
+                category_bucket = category_totals_cents.setdefault(
+                    category,
+                    {"category": category, "total_cents": 0, "transaction_count": 0},
+                )
+                category_bucket["total_cents"] += abs(amount_cents)
+                category_bucket["transaction_count"] += 1
+            elif amount_cents > 0:
+                income_cents += amount_cents
+            net_cents += amount_cents
+
+            preview_rows.append({
+                "date": row["date"],
+                "description": row["description"],
+                "amount": cents_to_dollars(amount_cents),
+                "category": category,
+                "source_file": source_file,
+                "duplicate": duplicate,
+            })
+
+    dates = sorted(row["date"] for row in rows if row.get("date"))
+    categories = sorted(
+        [
+            {
+                "category": item["category"],
+                "total": cents_to_dollars(item["total_cents"]),
+                "transaction_count": item["transaction_count"],
+            }
+            for item in category_totals_cents.values()
+        ],
+        key=lambda item: item["total"],
+        reverse=True,
+    )
+
+    return {
+        "row_count": len(rows),
+        "importable_count": len(rows) - duplicate_count,
+        "duplicate_count": duplicate_count,
+        "first_transaction_date": dates[0] if dates else None,
+        "last_transaction_date": dates[-1] if dates else None,
+        "total_spending": cents_to_dollars(spending_cents),
+        "total_income": cents_to_dollars(income_cents),
+        "net": cents_to_dollars(net_cents),
+        "categories": categories,
+        "rows": preview_rows[:sample_limit],
+        "errors": [],
+    }
+
+
 def record_upload(filename: str, file_type: str, rows: list[dict], result: dict) -> dict:
     """Record a successful statement upload."""
     dates = sorted(row["date"] for row in rows if row.get("date"))

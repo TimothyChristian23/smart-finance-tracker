@@ -8,6 +8,7 @@ The first implementation slice focuses on trustworthy analytics:
 
 - CSV transaction upload
 - Text-based PDF statement upload
+- Import preview with duplicate estimates before saving
 - Upload history with imported and duplicate counts
 - SQLite transaction storage
 - Rule-based starter categorization
@@ -117,6 +118,7 @@ GET  /insights/monthly?month=2026-07
 GET  /forecast/monthly?month=2026-08
 GET  /months
 GET  /uploads
+POST /transactions/preview
 GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
 GET  /categories?month=2026-07
@@ -144,6 +146,10 @@ PDF uploads are supported when the statement exposes selectable text with rows l
 ```
 
 Statements that are scanned images will need OCR support before they can be imported.
+
+Use import preview from the dashboard or `POST /transactions/preview` to inspect
+normalized rows, category assignments, totals, and duplicate estimates before
+saving statement data.
 
 Recurring charge detection needs the same merchant to appear across multiple months,
 so it becomes useful after importing a few statements. Upload

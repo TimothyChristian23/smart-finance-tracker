@@ -34,6 +34,7 @@ from app.database import (
     monthly_summary,
     question_evidence,
     monthly_trends,
+    preview_import,
     record_upload,
     recurring_charges,
     reset_db,
@@ -58,6 +59,37 @@ class UploadResponse(BaseModel):
     filename: str
     imported: int
     duplicates_skipped: int = 0
+
+
+class ImportPreviewRow(BaseModel):
+    date: str
+    description: str
+    amount: float
+    category: str
+    source_file: str | None = None
+    duplicate: bool
+
+
+class ImportPreviewCategory(BaseModel):
+    category: str
+    total: float
+    transaction_count: int
+
+
+class ImportPreviewResponse(BaseModel):
+    filename: str
+    file_type: str
+    row_count: int
+    importable_count: int
+    duplicate_count: int
+    first_transaction_date: str | None = None
+    last_transaction_date: str | None = None
+    total_spending: float
+    total_income: float
+    net: float
+    categories: list[ImportPreviewCategory]
+    rows: list[ImportPreviewRow]
+    errors: list[str] = Field(default_factory=list)
 
 
 class UploadHistoryResponse(BaseModel):
@@ -252,26 +284,27 @@ async def health() -> dict:
 @app.post("/transactions/upload", response_model=UploadResponse)
 async def upload_transactions(file: UploadFile = File(...)) -> UploadResponse:
     """Upload a CSV or text-based PDF bank statement and import transactions."""
-    filename = Path(file.filename or "transactions.csv").name
-    suffix = Path(filename).suffix.lower()
-    content = await file.read()
-    if suffix == ".csv":
-        try:
-            rows = parse_transactions_csv(content.decode("utf-8-sig"), filename)
-        except UnicodeDecodeError as exc:
-            raise HTTPException(status_code=400, detail="CSV file must be UTF-8 text.") from exc
-    elif suffix == ".pdf":
-        rows = parse_transactions_pdf(content, filename)
-    else:
-        raise HTTPException(status_code=400, detail="Only CSV or text-based PDF uploads are supported.")
+    filename, file_type, rows = await parse_uploaded_statement(file)
 
     result = insert_transactions(rows)
-    record_upload(filename, suffix.lstrip("."), rows, result)
+    record_upload(filename, file_type, rows, result)
     return UploadResponse(
         filename=filename,
         imported=result["inserted"],
         duplicates_skipped=result["skipped"],
     )
+
+
+@app.post("/transactions/preview", response_model=ImportPreviewResponse)
+async def preview_transactions(file: UploadFile = File(...), limit: int = 25) -> dict:
+    """Preview parsed statement rows and duplicate estimates without importing."""
+    filename, file_type, rows = await parse_uploaded_statement(file)
+    preview = preview_import(rows, sample_limit=bounded_limit(limit, maximum=100))
+    return {
+        "filename": filename,
+        "file_type": file_type,
+        **preview,
+    }
 
 
 @app.get("/transactions", response_model=list[TransactionResponse])
@@ -764,6 +797,20 @@ async def ask(request: AskRequest) -> AskResponse:
 async def clear_transactions() -> dict:
     reset_db()
     return {"message": "Transactions cleared."}
+
+
+async def parse_uploaded_statement(file: UploadFile) -> tuple[str, str, list[dict]]:
+    filename = Path(file.filename or "transactions.csv").name
+    suffix = Path(filename).suffix.lower()
+    content = await file.read()
+    if suffix == ".csv":
+        try:
+            return filename, "csv", parse_transactions_csv(content.decode("utf-8-sig"), filename)
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail="CSV file must be UTF-8 text.") from exc
+    if suffix == ".pdf":
+        return filename, "pdf", parse_transactions_pdf(content, filename)
+    raise HTTPException(status_code=400, detail="Only CSV or text-based PDF uploads are supported.")
 
 
 def parse_transactions_csv(content: str, source_file: str) -> list[dict]:
