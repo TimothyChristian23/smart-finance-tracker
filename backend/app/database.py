@@ -689,6 +689,38 @@ def list_accounts() -> list[str]:
     return [row["account_name"] for row in rows]
 
 
+def account_summary(month: str | None = None) -> list[dict]:
+    """Return income, spending, and net totals grouped by account label."""
+    where_sql, params = _month_filter(month)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                account_name,
+                COALESCE(SUM(CASE WHEN amount_cents < 0 THEN ABS(amount_cents) ELSE 0 END), 0) AS spending_cents,
+                COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0) AS income_cents,
+                COALESCE(SUM(amount_cents), 0) AS net_cents,
+                COUNT(*) AS transaction_count
+            FROM transactions
+            {where_sql}
+            GROUP BY account_name
+            ORDER BY spending_cents DESC, income_cents DESC, transaction_count DESC
+            """,
+            params,
+        ).fetchall()
+
+    return [
+        {
+            "account_name": row["account_name"],
+            "total_spending": cents_to_dollars(row["spending_cents"]),
+            "total_income": cents_to_dollars(row["income_cents"]),
+            "net": cents_to_dollars(row["net_cents"]),
+            "transaction_count": row["transaction_count"],
+        }
+        for row in rows
+    ]
+
+
 def list_transactions(
     limit: int = 200,
     month: str | None = None,

@@ -331,6 +331,52 @@ def test_create_manual_transaction_validates_inputs():
     assert client.get("/transactions").json() == []
 
 
+def test_account_summary_groups_totals_by_account():
+    client.post(
+        "/transactions/upload",
+        data={"account_name": "Chase Checking"},
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    )
+    client.post(
+        "/transactions",
+        json={
+            "date": "2026-07-14",
+            "description": "Cash Lunch",
+            "amount": -42.00,
+            "category": "Dining",
+            "account_name": "Cash",
+        },
+    )
+    client.post(
+        "/transactions",
+        json={
+            "date": "2026-07-15",
+            "description": "Cash Gift",
+            "amount": 125.00,
+            "category": "Income",
+            "account_name": "Cash",
+        },
+    )
+
+    response = client.get("/accounts/summary?month=2026-07")
+
+    assert response.status_code == 200
+    by_account = {item["account_name"]: item for item in response.json()}
+    assert set(by_account) == {"Cash", "Chase Checking"}
+    assert by_account["Chase Checking"]["total_spending"] == 2840.87
+    assert by_account["Chase Checking"]["total_income"] == 3200.0
+    assert by_account["Chase Checking"]["net"] == 359.13
+    assert by_account["Chase Checking"]["transaction_count"] == 11
+    assert by_account["Cash"]["total_spending"] == 42.0
+    assert by_account["Cash"]["total_income"] == 125.0
+    assert by_account["Cash"]["net"] == 83.0
+    assert by_account["Cash"]["transaction_count"] == 2
+
+    bad_month = client.get("/accounts/summary?month=July")
+    assert bad_month.status_code == 400
+    assert bad_month.json()["detail"] == "month must use YYYY-MM format."
+
+
 def test_update_transaction_details_recalculates_analytics():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = next(

@@ -598,6 +598,65 @@ h2 {
   color: var(--warn);
 }
 
+.account-summary-list {
+  display: grid;
+  gap: 9px;
+}
+
+.account-summary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, auto);
+  gap: 12px;
+  align-items: center;
+  min-height: 84px;
+  border: 1px solid var(--line);
+  padding: 10px;
+}
+
+.account-summary-row strong,
+.account-summary-row > div > span {
+  display: block;
+}
+
+.account-summary-row strong {
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+}
+
+.account-summary-row > div > span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.account-summary-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(70px, 1fr));
+  gap: 8px;
+}
+
+.account-summary-values span {
+  display: grid;
+  gap: 3px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+}
+
+.account-summary-values small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.account-summary-values b {
+  color: var(--ink);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
 .insight-list {
   display: grid;
   gap: 8px;
@@ -1252,6 +1311,14 @@ h2 {
   }
 
   .forecast-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .account-summary-row {
+    grid-template-columns: 1fr;
+  }
+
+  .account-summary-values {
     grid-template-columns: 1fr;
   }
 

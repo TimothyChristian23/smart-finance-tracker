@@ -7,6 +7,7 @@ import {
   Check,
   ClipboardList,
   CircleDollarSign,
+  CreditCard,
   Download,
   Eye,
   FileUp,
@@ -56,6 +57,7 @@ export default function App() {
   const [largestExpenses, setLargestExpenses] = useState([]);
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [accountSummary, setAccountSummary] = useState([]);
   const [categoryReview, setCategoryReview] = useState([]);
   const [merchantRules, setMerchantRules] = useState([]);
   const [budgets, setBudgets] = useState([]);
@@ -105,6 +107,7 @@ export default function App() {
         largestPayload,
         categoryOptionsPayload,
         accountPayload,
+        accountSummaryPayload,
         categoryReviewPayload,
         merchantRulesPayload,
         budgetPayload,
@@ -130,6 +133,7 @@ export default function App() {
         request(`/expenses/largest${queryString({ month: activeMonth, limit: 6 })}`),
         request("/category-options"),
         request("/accounts"),
+        request(`/accounts/summary${queryString({ month: activeMonth })}`),
         request(`/categories/review${queryString({ month: activeMonth, limit: 6 })}`),
         request("/merchant-rules"),
         request(`/budgets${queryString({ month: activeMonth })}`),
@@ -151,6 +155,7 @@ export default function App() {
       setLargestExpenses(largestPayload);
       setCategoryOptions(categoryOptionsPayload);
       setAccounts(accountPayload);
+      setAccountSummary(accountSummaryPayload);
       setCategoryReview(categoryReviewPayload);
       setMerchantRules(merchantRulesPayload);
       setBudgets(budgetPayload);
@@ -640,6 +645,11 @@ export default function App() {
           <UploadHistoryList uploads={uploads} />
         </section>
 
+        <section className="panel accounts-panel">
+          <PanelTitle icon={<CreditCard size={18} />} title="Account Summary" detail={selectedMonthLabel} />
+          <AccountSummaryList accounts={accountSummary} />
+        </section>
+
         <section className="panel privacy-panel">
           <PanelTitle icon={<Shield size={18} />} title="Privacy" detail="Local data" />
           <form className="privacy-form" onSubmit={handleResetLocalData}>
@@ -999,6 +1009,39 @@ function UploadHistoryList({ uploads }) {
             </span>
           </div>
           <b>{upload.imported_count}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AccountSummaryList({ accounts }) {
+  if (!accounts.length) return <p className="empty">No account activity yet.</p>;
+
+  return (
+    <div className="account-summary-list">
+      {accounts.map((account) => (
+        <div className="account-summary-row" key={account.account_name || "unlabeled"}>
+          <div>
+            <strong>{account.account_name || "Unlabeled"}</strong>
+            <span>
+              {account.transaction_count} transaction{account.transaction_count === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="account-summary-values">
+            <span>
+              <small>Spending</small>
+              <b>{money(account.total_spending)}</b>
+            </span>
+            <span>
+              <small>Income</small>
+              <b>{money(account.total_income)}</b>
+            </span>
+            <span>
+              <small>Net</small>
+              <b className={account.net < 0 ? "negative" : "positive"}>{money(account.net)}</b>
+            </span>
+          </div>
         </div>
       ))}
     </div>

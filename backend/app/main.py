@@ -16,6 +16,7 @@ from pypdf import PdfReader
 
 from app.categorization import CATEGORY_OPTIONS, categories_from_question, categorize_transaction
 from app.database import (
+    account_summary,
     available_months,
     budget_progress,
     budget_recommendations,
@@ -115,6 +116,14 @@ class UploadHistoryResponse(BaseModel):
     first_transaction_date: str | None = None
     last_transaction_date: str | None = None
     created_at: str
+
+
+class AccountSummaryResponse(BaseModel):
+    account_name: str | None = None
+    total_spending: float
+    total_income: float
+    net: float
+    transaction_count: int
 
 
 class TransactionResponse(BaseModel):
@@ -489,6 +498,11 @@ async def export_data() -> Response:
 @app.get("/accounts", response_model=list[str])
 async def accounts() -> list[str]:
     return list_accounts()
+
+
+@app.get("/accounts/summary", response_model=list[AccountSummaryResponse])
+async def accounts_summary(month: str | None = None) -> list[dict]:
+    return account_summary(month=validate_month(month))
 
 
 @app.get("/uploads", response_model=list[UploadHistoryResponse])

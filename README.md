@@ -12,6 +12,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Manual transaction entry for cash purchases or one-off corrections
 - Flexible CSV parsing for common bank column names and debit/credit formats
 - Optional account labels for statement imports and transaction filtering
+- Account-level spending, income, and net summaries
 - Upload history with imported and duplicate counts
 - SQLite transaction storage
 - Rule-based starter categorization
@@ -132,6 +133,7 @@ GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
 GET  /data/export
 GET  /accounts
+GET  /accounts/summary?month=2026-07
 GET  /ask/history
 GET  /categories?month=2026-07
 GET  /categories/review?month=2026-07
@@ -176,6 +178,8 @@ direction.
 Use the dashboard account label field or CSV headers like `Account` and
 `Account Name` to track which account a statement came from. Transaction list and
 CSV export requests can filter by account with `account=Chase%20Checking`.
+The Account Summary panel and `GET /accounts/summary` endpoint break spending,
+income, net cash flow, and transaction counts down by account.
 Manual transactions can be added from the Transactions panel and are stored with
 `manual` as their source.
 
