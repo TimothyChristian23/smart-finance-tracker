@@ -71,6 +71,7 @@ export default function App() {
   const [answer, setAnswer] = useState(null);
   const [askHistory, setAskHistory] = useState([]);
   const [resetConfirmation, setResetConfirmation] = useState("");
+  const [creatingTransaction, setCreatingTransaction] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [editDraft, setEditDraft] = useState(emptyTransactionDraft());
   const [busy, setBusy] = useState(false);
@@ -259,6 +260,7 @@ export default function App() {
       setAnswer(null);
       setMonth("");
       setUploadPreview(null);
+      setCreatingTransaction(false);
       setEditingTransaction(null);
       await refreshDashboard();
     } catch (error) {
@@ -283,6 +285,7 @@ export default function App() {
       setAnswer(null);
       setMonth("");
       setUploadPreview(null);
+      setCreatingTransaction(false);
       setEditingTransaction(null);
       setAskHistory([]);
       setBudgetDraft({ category: "", amount: "" });
@@ -318,18 +321,26 @@ export default function App() {
   }
 
   function handleOpenTransactionEditor(transaction) {
+    setCreatingTransaction(false);
     setEditingTransaction(transaction);
     setEditDraft(transactionToDraft(transaction));
   }
 
+  function handleOpenTransactionCreator() {
+    setEditingTransaction(null);
+    setCreatingTransaction(true);
+    setEditDraft(newTransactionDraft(month, categoryOptions, transactionFilters.account));
+  }
+
   function handleCloseTransactionEditor() {
+    setCreatingTransaction(false);
     setEditingTransaction(null);
     setEditDraft(emptyTransactionDraft());
   }
 
   async function handleTransactionEditSubmit(event) {
     event.preventDefault();
-    if (!editingTransaction) return;
+    if (!creatingTransaction && !editingTransaction) return;
     if (!editDraft.date || !editDraft.description.trim()) {
       setUploadStatus("Enter a date and description.");
       return;
@@ -341,18 +352,19 @@ export default function App() {
 
     setBusy(true);
     try {
-      const updated = await request(`/transactions/${editingTransaction.id}`, {
-        method: "PATCH",
+      const payload = {
+        date: editDraft.date,
+        description: editDraft.description,
+        amount: Number(editDraft.amount),
+        category: editDraft.category,
+        account_name: editDraft.account_name,
+      };
+      const saved = await request(creatingTransaction ? "/transactions" : `/transactions/${editingTransaction.id}`, {
+        method: creatingTransaction ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: editDraft.date,
-          description: editDraft.description,
-          amount: Number(editDraft.amount),
-          category: editDraft.category,
-          account_name: editDraft.account_name,
-        }),
+        body: JSON.stringify(payload),
       });
-      setUploadStatus(`Updated ${updated.description}.`);
+      setUploadStatus(`${creatingTransaction ? "Added" : "Updated"} ${saved.description}.`);
       handleCloseTransactionEditor();
       await refreshDashboard();
     } catch (error) {
@@ -673,6 +685,8 @@ export default function App() {
           onChange={handleTransactionFilterChange}
           onClear={handleClearTransactionFilters}
           onExport={handleExportTransactions}
+          onAdd={handleOpenTransactionCreator}
+          busy={busy}
           total={transactions.length}
         />
         <div className="transaction-table">
@@ -695,11 +709,12 @@ export default function App() {
         {!visibleTransactions.length && <p className="empty">No matching transactions.</p>}
       </section>
 
-      {editingTransaction && (
+      {(creatingTransaction || editingTransaction) && (
         <TransactionEditModal
           categoryOptions={categoryOptions}
           draft={editDraft}
           busy={busy}
+          mode={creatingTransaction ? "create" : "edit"}
           onClose={handleCloseTransactionEditor}
           onDraftChange={setEditDraft}
           onSubmit={handleTransactionEditSubmit}
@@ -1082,7 +1097,7 @@ function formatHistoryMeta(item) {
   return item.month ? `${intent} - ${item.month}` : intent;
 }
 
-function TransactionFilters({ accounts, categoryOptions, filters, onChange, onClear, onExport, total }) {
+function TransactionFilters({ accounts, busy, categoryOptions, filters, onAdd, onChange, onClear, onExport, total }) {
   return (
     <div className="transaction-toolbar">
       <label className="transaction-filter">
@@ -1122,6 +1137,15 @@ function TransactionFilters({ accounts, categoryOptions, filters, onChange, onCl
         type="button"
       >
         <X size={16} />
+      </button>
+      <button
+        className="add-transaction-button"
+        disabled={busy || !categoryOptions.length}
+        onClick={onAdd}
+        type="button"
+      >
+        <Plus size={16} />
+        Add
       </button>
       <button className="ghost-button export-button" disabled={!total} onClick={onExport} type="button">
         <Download size={16} />
@@ -1167,16 +1191,19 @@ function TransactionRow({ categoryOptions, onCategoryChange, onEdit, transaction
   );
 }
 
-function TransactionEditModal({ busy, categoryOptions, draft, onClose, onDraftChange, onSubmit, transaction }) {
+function TransactionEditModal({ busy, categoryOptions, draft, mode = "edit", onClose, onDraftChange, onSubmit, transaction }) {
+  const isCreate = mode === "create";
+  const title = isCreate ? "New Transaction" : transaction?.description || "Transaction";
+
   return (
     <div className="modal-backdrop">
       <section className="modal" role="dialog" aria-modal="true" aria-labelledby="transaction-edit-title">
         <div className="modal-header">
           <div>
-            <p className="eyebrow">Transaction</p>
-            <h2 id="transaction-edit-title">{transaction.description}</h2>
+            <p className="eyebrow">{isCreate ? "Manual entry" : "Transaction"}</p>
+            <h2 id="transaction-edit-title">{title}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Close editor" title="Close editor">
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Close transaction form" title="Close form">
             <X size={18} />
           </button>
         </div>
@@ -1213,8 +1240,10 @@ function TransactionEditModal({ busy, categoryOptions, draft, onClose, onDraftCh
             Category
             <select
               onChange={(event) => onDraftChange({ ...draft, category: event.target.value })}
+              required
               value={draft.category}
             >
+              {!draft.category && <option value="">Category</option>}
               {categoryOptions.map((category) => (
                 <option key={category} value={category}>{category}</option>
               ))}
@@ -1232,8 +1261,8 @@ function TransactionEditModal({ busy, categoryOptions, draft, onClose, onDraftCh
           <div className="modal-actions full-span">
             <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
             <button type="submit" disabled={busy || !draft.category}>
-              <Check size={16} />
-              Save
+              {isCreate ? <Plus size={16} /> : <Check size={16} />}
+              {isCreate ? "Add" : "Save"}
             </button>
           </div>
         </form>
@@ -1304,6 +1333,28 @@ function emptyTransactionDraft() {
     category: "",
     account_name: "",
   };
+}
+
+function newTransactionDraft(activeMonth, categoryOptions, accountName) {
+  return {
+    date: defaultTransactionDate(activeMonth),
+    description: "",
+    amount: "",
+    category: defaultTransactionCategory(categoryOptions),
+    account_name: accountName || "",
+  };
+}
+
+function defaultTransactionDate(activeMonth) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (/^\d{4}-\d{2}$/.test(activeMonth)) {
+    return today.startsWith(activeMonth) ? today : `${activeMonth}-01`;
+  }
+  return today;
+}
+
+function defaultTransactionCategory(categoryOptions) {
+  return categoryOptions.includes("Other") ? "Other" : categoryOptions[0] || "";
 }
 
 function transactionToDraft(transaction) {

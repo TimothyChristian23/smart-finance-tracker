@@ -22,6 +22,7 @@ from app.database import (
     category_review_queue,
     category_totals,
     cents_to_dollars,
+    create_transaction,
     delete_budget,
     delete_merchant_rule,
     detect_anomalies,
@@ -137,6 +138,14 @@ class CategoryReviewResponse(BaseModel):
 class CategoryUpdateRequest(BaseModel):
     category: str = Field(..., min_length=1, max_length=80)
     remember: bool = False
+
+
+class TransactionCreateRequest(BaseModel):
+    date: str
+    description: str = Field(..., min_length=1, max_length=200)
+    amount: float
+    category: str = Field(..., min_length=1, max_length=80)
+    account_name: str | None = Field(None, max_length=80)
 
 
 class TransactionUpdateRequest(BaseModel):
@@ -412,6 +421,17 @@ async def transactions(
     account: str | None = None,
 ) -> list[dict]:
     return filtered_transactions(limit=limit, month=month, category=category, search=search, account=account)
+
+
+@app.post("/transactions", response_model=TransactionResponse)
+async def create_manual_transaction(request: TransactionCreateRequest) -> dict:
+    return create_transaction(
+        transaction_date=validate_transaction_date(request.date),
+        description=validate_transaction_description(request.description),
+        amount_cents=dollars_to_cents(request.amount),
+        category=validate_category(request.category),
+        account_name=validate_account_name(request.account_name),
+    )
 
 
 @app.get("/transactions/export")

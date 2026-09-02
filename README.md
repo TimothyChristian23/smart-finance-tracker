@@ -9,6 +9,7 @@ The first implementation slice focuses on trustworthy analytics:
 - CSV transaction upload
 - Text-based PDF statement upload
 - Import preview with duplicate estimates before saving
+- Manual transaction entry for cash purchases or one-off corrections
 - Flexible CSV parsing for common bank column names and debit/credit formats
 - Optional account labels for statement imports and transaction filtering
 - Upload history with imported and duplicate counts
@@ -124,6 +125,7 @@ GET  /insights/monthly?month=2026-07
 GET  /forecast/monthly?month=2026-08
 GET  /months
 GET  /uploads
+POST /transactions
 POST /transactions/preview
 GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
@@ -172,6 +174,8 @@ direction.
 Use the dashboard account label field or CSV headers like `Account` and
 `Account Name` to track which account a statement came from. Transaction list and
 CSV export requests can filter by account with `account=Chase%20Checking`.
+Manual transactions can be added from the Transactions panel and are stored with
+`manual` as their source.
 
 Use `GET /data/export` or the dashboard Backup button to download a JSON snapshot
 of local finance data before clearing or moving development databases.

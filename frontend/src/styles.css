@@ -317,7 +317,8 @@ h2 {
 .budget-form button,
 .ask-form button,
 .privacy-form button,
-.ghost-button {
+.ghost-button,
+.add-transaction-button {
   display: inline-flex;
   min-height: 40px;
   align-items: center;
@@ -329,7 +330,8 @@ h2 {
 .upload-form button,
 .budget-form button,
 .ask-form button,
-.privacy-form button {
+.privacy-form button,
+.add-transaction-button {
   background: var(--accent);
   color: #fff;
 }
@@ -914,7 +916,7 @@ h2 {
 
 .transaction-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 170px 190px 40px auto;
+  grid-template-columns: minmax(220px, 1fr) 170px 190px 40px auto auto;
   gap: 10px;
   align-items: center;
   margin-bottom: 12px;
@@ -956,7 +958,8 @@ h2 {
   padding: 0;
 }
 
-.export-button {
+.export-button,
+.add-transaction-button {
   padding: 0 12px;
   white-space: nowrap;
 }

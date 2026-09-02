@@ -259,6 +259,78 @@ def test_statement_uploads_can_be_labeled_and_filtered_by_account():
     assert backup["uploads"][0]["account_name"] == "Chase Checking"
 
 
+def test_create_manual_transaction_recalculates_analytics():
+    response = client.post(
+        "/transactions",
+        json={
+            "date": "2026-08-14",
+            "description": "Cash Farmers Market",
+            "amount": -42.37,
+            "category": "Food & Grocery",
+            "account_name": "Cash",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["date"] == "2026-08-14"
+    assert payload["description"] == "Cash Farmers Market"
+    assert payload["amount"] == -42.37
+    assert payload["category"] == "Food & Grocery"
+    assert payload["account_name"] == "Cash"
+    assert payload["source_file"] == "manual"
+
+    summary = client.get("/summary?month=2026-08").json()
+    assert summary["total_spending"] == 42.37
+    assert summary["total_income"] == 0
+    assert summary["net"] == -42.37
+    assert summary["transaction_count"] == 1
+    assert summary["categories"] == [{"category": "Food & Grocery", "total": 42.37}]
+
+    assert client.get("/accounts").json() == ["Cash"]
+    filtered = client.get("/transactions", params={"account": "Cash"}).json()
+    assert len(filtered) == 1
+    assert filtered[0]["description"] == "Cash Farmers Market"
+
+
+def test_create_manual_transaction_validates_inputs():
+    bad_date = client.post(
+        "/transactions",
+        json={
+            "date": "not-a-date",
+            "description": "Cash Farmers Market",
+            "amount": -42.37,
+            "category": "Food & Grocery",
+        },
+    )
+    bad_category = client.post(
+        "/transactions",
+        json={
+            "date": "2026-08-14",
+            "description": "Cash Farmers Market",
+            "amount": -42.37,
+            "category": "Mystery",
+        },
+    )
+    blank_description = client.post(
+        "/transactions",
+        json={
+            "date": "2026-08-14",
+            "description": "   ",
+            "amount": -42.37,
+            "category": "Food & Grocery",
+        },
+    )
+
+    assert bad_date.status_code == 400
+    assert bad_date.json()["detail"] == "invalid date 'not-a-date'"
+    assert bad_category.status_code == 400
+    assert "category must be one of" in bad_category.json()["detail"]
+    assert blank_description.status_code == 400
+    assert blank_description.json()["detail"] == "description cannot be empty."
+    assert client.get("/transactions").json() == []
+
+
 def test_update_transaction_details_recalculates_analytics():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = next(

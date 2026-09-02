@@ -254,6 +254,50 @@ def insert_transactions(rows: list[dict]) -> dict:
     return result
 
 
+def create_transaction(
+    *,
+    transaction_date: str,
+    description: str,
+    amount_cents: int,
+    category: str,
+    account_name: str | None = None,
+    source_file: str | None = "manual",
+) -> dict:
+    """Create one manually-entered transaction."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO transactions (
+                transaction_date,
+                description,
+                amount_cents,
+                category,
+                source_file,
+                account_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                transaction_date,
+                description,
+                amount_cents,
+                category,
+                source_file,
+                account_name,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
+            FROM transactions
+            WHERE id = ?
+            """,
+            (cursor.lastrowid,),
+        ).fetchone()
+    return _transaction_row_to_dict(row)
+
+
 def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
     """Return normalized import rows, totals, and duplicate estimates without saving."""
     if not rows:
