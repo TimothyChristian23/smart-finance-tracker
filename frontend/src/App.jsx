@@ -65,6 +65,7 @@ export default function App() {
   const [recurringCharges, setRecurringCharges] = useState([]);
   const [uploads, setUploads] = useState([]);
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
+  const [ruleDraft, setRuleDraft] = useState(emptyRuleDraft());
   const [transactionFilters, setTransactionFilters] = useState({ account: "", category: "", search: "" });
   const [month, setMonth] = useState("");
   const [uploadPreview, setUploadPreview] = useState(null);
@@ -340,6 +341,7 @@ export default function App() {
       setEditingTransaction(null);
       setAskHistory([]);
       setBudgetDraft({ category: "", amount: "" });
+      setRuleDraft(emptyRuleDraft());
       setTransactionFilters({ account: "", category: "", search: "" });
       setResetConfirmation("");
       setRestoreConfirmation("");
@@ -383,6 +385,7 @@ export default function App() {
       setEditingTransaction(null);
       setAskHistory([]);
       setBudgetDraft({ category: "", amount: "" });
+      setRuleDraft(emptyRuleDraft());
       setTransactionFilters({ account: "", category: "", search: "" });
       setResetConfirmation("");
       setRestoreConfirmation("");
@@ -490,6 +493,43 @@ export default function App() {
     try {
       await request(`/merchant-rules/${rule.id}`, { method: "DELETE" });
       setUploadStatus(`Removed rule for ${rule.merchant}.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRuleSubmit(event) {
+    event.preventDefault();
+    const merchant = ruleDraft.merchant.trim();
+    const category = ruleDraft.category || categoryOptions[0] || "";
+    if (!merchant) {
+      setUploadStatus("Enter a merchant name.");
+      return;
+    }
+    if (!category) {
+      setUploadStatus("Choose a category for the rule.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const payload = await request("/merchant-rules", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          merchant,
+          category,
+          apply_existing: ruleDraft.apply_existing,
+        }),
+      });
+      const transactionText = payload.updated_transactions === 1 ? "transaction" : "transactions";
+      setUploadStatus(payload.updated_transactions
+        ? `Saved ${payload.rule.category} rule for ${payload.rule.merchant} and updated ${payload.updated_transactions} ${transactionText}.`
+        : `Saved ${payload.rule.category} rule for ${payload.rule.merchant}.`);
+      setRuleDraft({ ...emptyRuleDraft(), category: payload.rule.category });
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -794,8 +834,15 @@ export default function App() {
           <MoneyList items={merchants} emptyText="No merchant spend yet." getTitle={(item) => item.merchant} getSubtitle={(item) => item.category} />
         </section>
 
-        <section className="panel rules-panel">
+        <section className="panel rules-panel" data-testid="rules-panel">
           <PanelTitle icon={<BookmarkPlus size={18} />} title="Merchant Rules" detail={`${merchantRules.length} saved`} />
+          <RuleForm
+            categories={categoryOptions}
+            disabled={busy || !categoryOptions.length}
+            draft={ruleDraft}
+            onDraftChange={setRuleDraft}
+            onSubmit={handleRuleSubmit}
+          />
           <RuleList rules={merchantRules} busy={busy} onDelete={handleDeleteRule} />
         </section>
 
@@ -1239,6 +1286,49 @@ function RuleList({ rules, busy, onDelete }) {
   );
 }
 
+function RuleForm({ categories, disabled, draft, onDraftChange, onSubmit }) {
+  const selectedCategory = draft.category || categories[0] || "";
+
+  return (
+    <form className="rule-form" onSubmit={onSubmit}>
+      <input
+        aria-label="Rule merchant"
+        disabled={disabled}
+        maxLength={200}
+        onChange={(event) => onDraftChange({ ...draft, merchant: event.target.value })}
+        placeholder="Merchant name"
+        value={draft.merchant}
+      />
+      <select
+        aria-label="Rule category"
+        disabled={disabled}
+        onChange={(event) => onDraftChange({ ...draft, category: event.target.value })}
+        required
+        value={selectedCategory}
+      >
+        {!selectedCategory && <option value="">Category</option>}
+        {categories.map((category) => (
+          <option key={category} value={category}>{category}</option>
+        ))}
+      </select>
+      <label className="rule-apply">
+        <input
+          aria-label="Apply rule to existing matching transactions"
+          checked={draft.apply_existing}
+          disabled={disabled}
+          onChange={(event) => onDraftChange({ ...draft, apply_existing: event.target.checked })}
+          type="checkbox"
+        />
+        <span>Apply existing</span>
+      </label>
+      <button type="submit" disabled={disabled || !draft.merchant.trim() || !selectedCategory}>
+        <BookmarkPlus size={16} />
+        Save Rule
+      </button>
+    </form>
+  );
+}
+
 function AnswerCard({ answer }) {
   const citations = answer.citations || [];
 
@@ -1540,6 +1630,14 @@ function emptyTransactionDraft() {
     amount: "",
     category: "",
     account_name: "",
+  };
+}
+
+function emptyRuleDraft() {
+  return {
+    merchant: "",
+    category: "",
+    apply_existing: false,
   };
 }
 

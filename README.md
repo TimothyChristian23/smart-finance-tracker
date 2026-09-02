@@ -21,6 +21,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Editable transaction categories
 - Category review queue with confidence-scored suggestions
 - Saved normalized merchant rules that apply to future imports
+- Direct merchant rule creation with optional retroactive category updates
 - Editable transaction details for date, description, signed amount, category, and account
 - Individual transaction deletion with confirmation
 - Monthly category budgets with live progress
@@ -154,6 +155,7 @@ GET  /recurring
 GET  /expenses/largest?month=2026-07
 GET  /anomalies?month=2026-07
 PUT  /budgets
+PUT  /merchant-rules
 PATCH /transactions/{id}/category
 PATCH /transactions/{id}
 DELETE /transactions/{id}
@@ -229,6 +231,8 @@ and review items include confidence, source, matched merchant signals, and a sho
 reason. Ask `Why was Trader Joes categorized as Food & Grocery in July 2026?` to
 get the same explanation through Q&A. Applying a suggestion can also save a
 merchant rule for future imports.
+Merchant rules can also be created from the dashboard or `PUT /merchant-rules`;
+turn on `apply_existing` to recategorize matching transactions already in SQLite.
 
 ## Notes
 

@@ -55,6 +55,7 @@ from app.database import (
     recurring_charges,
     reset_all_data,
     reset_db,
+    save_merchant_rule,
     spending_for_categories,
     top_merchants,
     upsert_budget,
@@ -218,6 +219,17 @@ class MerchantRuleResponse(BaseModel):
     merchant_key: str
     category: str
     updated_at: str
+
+
+class MerchantRuleUpsertRequest(BaseModel):
+    merchant: str = Field(..., min_length=1, max_length=200)
+    category: str = Field(..., min_length=1, max_length=80)
+    apply_existing: bool = False
+
+
+class MerchantRuleUpsertResponse(BaseModel):
+    rule: MerchantRuleResponse
+    updated_transactions: int
 
 
 class BudgetUpsertRequest(BaseModel):
@@ -657,6 +669,13 @@ async def category_review(month: str | None = None, limit: int = 20) -> list[dic
 @app.get("/merchant-rules", response_model=list[MerchantRuleResponse])
 async def merchant_rules() -> list[dict]:
     return list_merchant_rules()
+
+
+@app.put("/merchant-rules", response_model=MerchantRuleUpsertResponse)
+async def upsert_rule(request: MerchantRuleUpsertRequest) -> dict:
+    merchant = validate_transaction_description(request.merchant)
+    category = validate_category(request.category)
+    return save_merchant_rule(merchant, category, apply_existing=request.apply_existing)
 
 
 @app.delete("/merchant-rules/{rule_id}")

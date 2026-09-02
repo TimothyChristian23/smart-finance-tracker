@@ -277,6 +277,7 @@ h2 {
 
 .upload-form,
 .budget-form,
+.rule-form,
 .ask-form,
 .privacy-form {
   display: grid;
@@ -297,6 +298,12 @@ h2 {
   margin-bottom: 12px;
 }
 
+.rule-form {
+  grid-template-columns: minmax(0, 1fr) minmax(132px, 0.7fr) minmax(118px, auto) auto;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
 .upload-form input {
   min-height: 42px;
   padding: 8px;
@@ -304,10 +311,34 @@ h2 {
 
 .budget-form select,
 .budget-form input,
+.rule-form > input,
+.rule-form select,
 .privacy-form input {
   min-width: 0;
   min-height: 40px;
   padding: 8px;
+}
+
+.rule-apply {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.rule-apply input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.rule-form button {
+  padding: 0 12px;
+  white-space: nowrap;
 }
 
 .ask-form textarea {
@@ -320,6 +351,7 @@ h2 {
 
 .upload-form button,
 .budget-form button,
+.rule-form button,
 .ask-form button,
 .privacy-form button,
 .ghost-button,
@@ -334,6 +366,7 @@ h2 {
 
 .upload-form button,
 .budget-form button,
+.rule-form button,
 .ask-form button,
 .privacy-form button,
 .add-transaction-button {
@@ -1334,7 +1367,8 @@ h2 {
     width: 100%;
   }
 
-  .budget-form {
+  .budget-form,
+  .rule-form {
     grid-template-columns: 1fr;
   }
 

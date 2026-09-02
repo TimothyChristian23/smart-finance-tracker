@@ -42,6 +42,20 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await page.getByLabel("Month").selectOption("2026-07");
   const transactionsPanel = page.getByTestId("transactions-panel");
   await expect(transactionsPanel.getByText("Trader Joes")).toBeVisible();
+
+  const rulesPanel = page.getByTestId("rules-panel");
+  await rulesPanel.getByLabel("Rule merchant").fill("Amazon Marketplace");
+  await rulesPanel.getByLabel("Rule category").selectOption("Subscriptions");
+  await rulesPanel.getByLabel("Apply rule to existing matching transactions").check();
+  await rulesPanel.getByRole("button", { name: "Save Rule" }).click();
+  await expect(page.getByTestId("status-message")).toHaveText(
+    "Saved Subscriptions rule for Amazon Marketplace and updated 1 transaction.",
+  );
+  await expect(rulesPanel.getByText("Amazon Marketplace")).toBeVisible();
+  await transactionsPanel.getByLabel("Search transactions").fill("Amazon");
+  await expect(transactionsPanel.getByLabel("Category for Amazon Marketplace")).toHaveValue("Subscriptions");
+  await transactionsPanel.getByLabel("Search transactions").fill("");
+
   await transactionsPanel.getByRole("button", { name: "Add" }).click();
 
   const modal = page.getByTestId("transaction-modal");

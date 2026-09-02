@@ -921,6 +921,57 @@ def test_remembered_merchant_rule_applies_to_future_imports():
     assert client.get("/merchant-rules").json() == []
 
 
+def test_direct_merchant_rule_can_apply_to_existing_and_future_imports():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.put(
+        "/merchant-rules",
+        json={
+            "merchant": "AMAZON MKTPLACE PMTS 123456 CA",
+            "category": "Subscriptions",
+            "apply_existing": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updated_transactions"] == 1
+    assert payload["rule"] == {
+        "id": payload["rule"]["id"],
+        "merchant": "Amazon Marketplace",
+        "merchant_key": "amazon marketplace",
+        "category": "Subscriptions",
+        "updated_at": payload["rule"]["updated_at"],
+    }
+
+    amazon = next(
+        item for item in client.get("/transactions", params={"search": "Amazon"}).json()
+        if item["source_file"] == "sample.csv"
+    )
+    assert amazon["category"] == "Subscriptions"
+
+    next_csv = """date,description,amount
+2026-08-03,CARD PURCHASE AMAZON MKTPLACE PMTS 998877 WA,-24.99
+"""
+    client.post("/transactions/upload", files={"file": ("next.csv", next_csv, "text/csv")})
+    next_amazon = next(
+        item for item in client.get("/transactions", params={"month": "2026-08", "search": "Amazon"}).json()
+        if item["source_file"] == "next.csv"
+    )
+    assert next_amazon["description"] == "Amazon Marketplace"
+    assert next_amazon["category"] == "Subscriptions"
+
+
+def test_direct_merchant_rule_validates_category():
+    response = client.put(
+        "/merchant-rules",
+        json={"merchant": "Amazon", "category": "Mystery"},
+    )
+
+    assert response.status_code == 400
+    assert "category must be one of" in response.json()["detail"]
+
+
 def test_unknown_transaction_category_is_rejected():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = client.get("/transactions").json()[0]

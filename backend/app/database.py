@@ -547,6 +547,31 @@ def list_merchant_rules() -> list[dict]:
     return [_merchant_rule_row_to_dict(row) for row in rows]
 
 
+def save_merchant_rule(merchant_name: str, category: str, apply_existing: bool = False) -> dict:
+    """Create or update a normalized merchant rule, optionally updating matching transactions."""
+    cleaned_name = clean_merchant_description(merchant_name)
+    target_key = merchant_key(cleaned_name)
+    with connect() as conn:
+        upsert_merchant_rule(conn, cleaned_name, category)
+        updated_count = 0
+        if apply_existing:
+            updated_count = apply_merchant_rule_to_transactions(conn, cleaned_name, category)
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT id, merchant_name, merchant_key, category, updated_at
+            FROM merchant_rules
+            WHERE merchant_key = ?
+            """,
+            (target_key,),
+        ).fetchone()
+
+    return {
+        "rule": _merchant_rule_row_to_dict(row),
+        "updated_transactions": updated_count,
+    }
+
+
 def update_transaction_category(transaction_id: int, category: str, remember: bool = False) -> dict | None:
     """Update one transaction category and optionally save a merchant rule."""
     with connect() as conn:
@@ -563,21 +588,7 @@ def update_transaction_category(transaction_id: int, category: str, remember: bo
 
         if remember:
             upsert_merchant_rule(conn, row["description"], category)
-            target_merchant_key = merchant_key(row["description"])
-            matching_ids = [
-                item["id"]
-                for item in conn.execute("SELECT id, description FROM transactions").fetchall()
-                if merchant_key(item["description"]) == target_merchant_key
-            ]
-            placeholders = ", ".join("?" for _ in matching_ids)
-            conn.execute(
-                f"""
-                UPDATE transactions
-                SET category = ?
-                WHERE id IN ({placeholders})
-                """,
-                [category, *matching_ids],
-            )
+            apply_merchant_rule_to_transactions(conn, row["description"], category)
         else:
             conn.execute(
                 """
@@ -600,9 +611,10 @@ def update_transaction_category(transaction_id: int, category: str, remember: bo
     return _transaction_row_to_dict(updated)
 
 
-def upsert_merchant_rule(conn: sqlite3.Connection, merchant_name: str, category: str) -> None:
-    """Insert or update an exact merchant category rule."""
+def upsert_merchant_rule(conn: sqlite3.Connection, merchant_name: str, category: str) -> str:
+    """Insert or update a normalized merchant category rule and return its key."""
     cleaned_name = clean_merchant_description(merchant_name)
+    target_key = merchant_key(cleaned_name)
     conn.execute(
         """
         INSERT INTO merchant_rules (merchant_key, merchant_name, category)
@@ -612,8 +624,32 @@ def upsert_merchant_rule(conn: sqlite3.Connection, merchant_name: str, category:
             category = excluded.category,
             updated_at = CURRENT_TIMESTAMP
         """,
-        (merchant_key(cleaned_name), cleaned_name, category),
+        (target_key, cleaned_name, category),
     )
+    return target_key
+
+
+def apply_merchant_rule_to_transactions(conn: sqlite3.Connection, merchant_name: str, category: str) -> int:
+    """Apply a merchant rule category to existing matching transactions."""
+    target_key = merchant_key(merchant_name)
+    matching_ids = [
+        item["id"]
+        for item in conn.execute("SELECT id, description FROM transactions").fetchall()
+        if merchant_key(item["description"]) == target_key
+    ]
+    if not matching_ids:
+        return 0
+
+    placeholders = ", ".join("?" for _ in matching_ids)
+    cursor = conn.execute(
+        f"""
+        UPDATE transactions
+        SET category = ?
+        WHERE id IN ({placeholders})
+        """,
+        [category, *matching_ids],
+    )
+    return cursor.rowcount
 
 
 def delete_merchant_rule(rule_id: int) -> bool:
@@ -1893,11 +1929,15 @@ def _restore_merchant_rules(backup: dict) -> list[tuple]:
     rows = []
     for index, item in enumerate(_backup_list(backup, "merchant_rules"), start=1):
         record = _backup_object(item, f"merchant_rules[{index}]")
-        merchant_name = _backup_required_text(record, "merchant", f"merchant_rules[{index}]", max_length=200)
-        merchant_key = _backup_optional_text(record, "merchant_key", max_length=200) or normalize_text(merchant_name)
+        merchant_name = clean_merchant_description(
+            _backup_required_text(record, "merchant", f"merchant_rules[{index}]", max_length=200)
+        )
+        merchant_key_value = merchant_key(
+            _backup_optional_text(record, "merchant_key", max_length=200) or merchant_name
+        )
         updated_at = _backup_optional_text(record, "updated_at", max_length=80)
         rows.append((
-            merchant_key,
+            merchant_key_value,
             merchant_name,
             _backup_required_text(record, "category", f"merchant_rules[{index}]", max_length=80),
             updated_at,
