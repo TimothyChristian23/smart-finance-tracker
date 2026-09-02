@@ -4,6 +4,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from app.categorization import clean_merchant_description, merchant_key
 from app.database import reset_db
 from app.main import app, infer_month, money_to_cents, parse_transactions_csv
 
@@ -31,6 +32,13 @@ RECURRING_CSV = """date,description,amount
 2026-06-15,Gym Membership,-44.00
 2026-07-15,Gym Membership,-46.00
 2026-07-20,Random Shop,-20.00
+"""
+
+MESSY_MERCHANT_CSV = """date,description,amount
+2026-08-01,POS DEBIT TRADER JOE'S #1234 SAN FRANCISCO CA,-42.10
+2026-08-02,TST*BLUE BOTTLE COFFEE 07/05 CA,-6.75
+2026-08-03,PAYPAL *HULU 4029357733 CA,-14.99
+2026-08-04,ACH CREDIT PAYROLL DEPOSIT ID 928372,3200.00
 """
 
 
@@ -144,6 +152,61 @@ def test_preview_includes_category_explanations_and_saved_rules():
     assert saved_rule_row["category_confidence"] == 0.99
     assert saved_rule_row["category_source"] == "saved_rule"
     assert "Saved merchant rule" in saved_rule_row["category_reason"]
+
+
+def test_parse_transactions_csv_cleans_noisy_merchant_descriptions():
+    rows = parse_transactions_csv(MESSY_MERCHANT_CSV, "messy.csv")
+
+    assert [row["description"] for row in rows] == [
+        "Trader Joes",
+        "Blue Bottle Coffee",
+        "Hulu",
+        "Payroll Deposit",
+    ]
+    assert [row["category"] for row in rows] == [
+        "Food & Grocery",
+        "Dining",
+        "Subscriptions",
+        "Income",
+    ]
+    assert clean_merchant_description("CHECKCARD 1234 TRADER JOES STORE 45 CA") == "Trader Joes"
+    assert merchant_key("POS DEBIT TRADER JOE'S #1234 SAN FRANCISCO CA") == "trader joes"
+
+
+def test_saved_merchant_rule_matches_noisy_descriptor_variants():
+    client.post("/transactions/upload", files={"file": ("messy.csv", MESSY_MERCHANT_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions", params={"month": "2026-08"}).json()
+        if item["description"] == "Trader Joes"
+    )
+
+    response = client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": True},
+    )
+    assert response.status_code == 200
+
+    next_csv = """date,description,amount
+2026-09-01,CHECKCARD 1234 TRADER JOES STORE 45 CA,-20.00
+"""
+    upload_response = client.post(
+        "/transactions/upload",
+        files={"file": ("next.csv", next_csv, "text/csv")},
+    )
+
+    assert upload_response.status_code == 200
+    assert upload_response.json()["imported"] == 1
+    imported = client.get(
+        "/transactions",
+        params={"month": "2026-09", "search": "Trader Joes"},
+    ).json()
+    assert imported[0]["description"] == "Trader Joes"
+    assert imported[0]["category"] == "Dining"
+
+    rules = client.get("/merchant-rules").json()
+    assert rules[0]["merchant"] == "Trader Joes"
+    assert rules[0]["merchant_key"] == "trader joes"
+    assert rules[0]["category"] == "Dining"
 
 
 def test_reviewed_import_preserves_edited_categories_and_logs_upload():
@@ -1026,6 +1089,37 @@ def test_analytics_endpoints_return_months_categories_trends_and_merchants():
         "transaction_count": 1,
     }
     assert largest[0]["description"] == "Apartment Rent"
+
+
+def test_top_merchants_groups_noisy_descriptor_variants():
+    client.post(
+        "/transactions",
+        json={
+            "date": "2026-08-01",
+            "description": "POS DEBIT TRADER JOE'S #1234 SAN FRANCISCO CA",
+            "amount": -42.10,
+            "category": "Food & Grocery",
+        },
+    )
+    client.post(
+        "/transactions",
+        json={
+            "date": "2026-08-05",
+            "description": "CHECKCARD 1234 TRADER JOES STORE 45 CA",
+            "amount": -20.00,
+            "category": "Food & Grocery",
+        },
+    )
+
+    response = client.get("/merchants?month=2026-08&limit=1")
+
+    assert response.status_code == 200
+    assert response.json()[0] == {
+        "merchant": "Trader Joes",
+        "category": "Food & Grocery",
+        "total": 62.1,
+        "transaction_count": 2,
+    }
 
 
 def test_budget_progress_uses_live_category_spending():

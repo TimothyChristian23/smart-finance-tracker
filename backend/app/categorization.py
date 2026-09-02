@@ -3,6 +3,101 @@ from __future__ import annotations
 
 import re
 
+STATE_ABBREVIATIONS = {
+    "AL",
+    "AK",
+    "AZ",
+    "AR",
+    "CA",
+    "CO",
+    "CT",
+    "DE",
+    "FL",
+    "GA",
+    "HI",
+    "IA",
+    "ID",
+    "IL",
+    "IN",
+    "KS",
+    "KY",
+    "LA",
+    "MA",
+    "MD",
+    "ME",
+    "MI",
+    "MN",
+    "MO",
+    "MS",
+    "MT",
+    "NC",
+    "ND",
+    "NE",
+    "NH",
+    "NJ",
+    "NM",
+    "NV",
+    "NY",
+    "OH",
+    "OK",
+    "OR",
+    "PA",
+    "RI",
+    "SC",
+    "SD",
+    "TN",
+    "TX",
+    "UT",
+    "VA",
+    "VT",
+    "WA",
+    "WI",
+    "WV",
+    "WY",
+    "DC",
+}
+
+PAYMENT_PREFIX_PATTERNS = [
+    r"\bach\s+(?:debit|credit)\b",
+    r"\bcard\s+purchase\b",
+    r"\bcheckcard\b",
+    r"\bdebit\s+card\s+purchase\b",
+    r"\belectronic\s+(?:debit|credit)\b",
+    r"\bpos\s+debit\b",
+    r"\bpurchase\b",
+    r"\brecurring\s+payment\b",
+    r"\bvisa\s+purchase\b",
+    r"\bweb\s+(?:authorized|payment)\b",
+]
+
+KNOWN_MERCHANT_ALIASES = [
+    ("trader joe", "Trader Joes"),
+    ("whole foods", "Whole Foods Market"),
+    ("blue bottle", "Blue Bottle Coffee"),
+    ("amazon", "Amazon Marketplace"),
+    ("doordash", "DoorDash"),
+    ("uber eats", "Uber Eats"),
+    ("chipotle", "Chipotle"),
+    ("safeway", "Safeway"),
+    ("netflix", "Netflix Subscription"),
+    ("spotify", "Spotify"),
+    ("hulu", "Hulu"),
+    ("starbucks", "Starbucks"),
+    ("mcdonald", "McDonald's"),
+    ("costco", "Costco"),
+    ("target", "Target"),
+    ("walmart", "Walmart"),
+    ("chevron", "Chevron"),
+    ("shell", "Shell"),
+    ("exxon", "Exxon"),
+    ("comcast", "Comcast"),
+    ("xfinity", "Xfinity"),
+    ("verizon", "Verizon"),
+    ("cvs", "CVS Pharmacy"),
+    ("walgreens", "Walgreens"),
+    ("gym membership", "Gym Membership"),
+]
+
 CATEGORY_KEYWORDS = {
     "Income": ["payroll", "salary", "direct deposit", "deposit"],
     "Housing": ["rent", "apartment", "mortgage"],
@@ -85,7 +180,7 @@ QUESTION_CATEGORY_KEYWORDS = {
 
 def categorize_transaction(description: str, amount_cents: int) -> str:
     """Assign a starter category from high-confidence merchant text and amount direction."""
-    normalized = normalize_text(description)
+    normalized = normalize_text(clean_merchant_description(description))
 
     if amount_cents > 0:
         return "Income"
@@ -108,6 +203,67 @@ def first_category_keyword_match(
             if keyword_matches(normalized_description, keyword):
                 return category, keyword
     return None
+
+
+def clean_merchant_description(value: str) -> str:
+    """Collapse noisy bank descriptors into a stable merchant display name."""
+    original = " ".join(value.split()).strip()
+    if not original:
+        return original
+
+    cleaned = re.sub(r"[*_|]+", " ", original)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    for pattern in PAYMENT_PREFIX_PATTERNS:
+        cleaned = re.sub(pattern, " ", cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b", " ", cleaned)
+    cleaned = re.sub(r"\b20\d{6}\b", " ", cleaned)
+    cleaned = re.sub(r"#\s*[a-z0-9-]+", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\b(?:auth|authorization|co id|id|inv|pos|ref|trace)\s*[:#-]?\s*[a-z0-9-]{4,}\b",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\b[a-z]*\d[a-z0-9-]{5,}\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:,.")
+
+    normalized = normalize_text(cleaned)
+    for keyword, merchant_name in KNOWN_MERCHANT_ALIASES:
+        if keyword_matches(normalized, keyword):
+            return merchant_name
+
+    tokens = cleaned.split()
+    while tokens and tokens[-1].upper().strip(".,") in STATE_ABBREVIATIONS:
+        tokens.pop()
+    while tokens and re.fullmatch(r"\d{5}(?:-\d{4})?", tokens[-1]):
+        tokens.pop()
+
+    fallback = " ".join(tokens).strip(" -:,.") or original
+    return title_case_merchant(fallback)
+
+
+def merchant_key(value: str) -> str:
+    """Return the normalized matching key for a merchant descriptor."""
+    return normalize_text(clean_merchant_description(value))
+
+
+def title_case_merchant(value: str) -> str:
+    """Title-case all-caps bank text while preserving already readable names."""
+    if not value.isupper() and not value.islower():
+        return value
+
+    replacements = {
+        "Ach": "ACH",
+        "At&t": "AT&T",
+        "Cvs": "CVS",
+        "Tst": "TST",
+        "Usa": "USA",
+    }
+    titled = " ".join(part.capitalize() for part in value.lower().split())
+    for source, target in replacements.items():
+        titled = re.sub(rf"\b{re.escape(source)}\b", target, titled)
+    return titled
 
 
 def expense_category_keywords() -> dict[str, list[str]]:
@@ -178,7 +334,8 @@ def explain_category_source(source: str) -> str:
 
 def suggest_category(description: str, amount_cents: int, current_category: str | None = None) -> dict:
     """Suggest a category with confidence, source, evidence, and a short reason."""
-    normalized = normalize_text(description)
+    merchant_name = clean_merchant_description(description)
+    normalized = normalize_text(merchant_name)
     current = current_category or categorize_transaction(description, amount_cents)
 
     if amount_cents > 0:

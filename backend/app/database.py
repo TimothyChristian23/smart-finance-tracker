@@ -10,7 +10,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from app.categorization import explain_category_source, normalize_text, suggest_category
+from app.categorization import (
+    clean_merchant_description,
+    explain_category_source,
+    merchant_key,
+    normalize_text,
+    suggest_category,
+)
 
 load_dotenv()
 
@@ -502,7 +508,7 @@ def merchant_rule_for_description(conn: sqlite3.Connection, description: str) ->
         FROM merchant_rules
         WHERE merchant_key = ?
         """,
-        (normalize_text(description),),
+        (merchant_key(description),),
     ).fetchone()
     return row["category"] if row else None
 
@@ -515,14 +521,15 @@ def category_suggestion_for_description(
 ) -> dict:
     """Return an explainable category suggestion, including saved-rule evidence."""
     rule_category = merchant_rule_for_description(conn, description)
+    merchant_name = clean_merchant_description(description)
     if rule_category:
         return {
             "category": rule_category,
             "confidence": 0.99,
             "confidence_label": "high",
             "source": "saved_rule",
-            "matched_terms": [description],
-            "reason": f"Saved merchant rule maps {description} to {rule_category}.",
+            "matched_terms": [merchant_name],
+            "reason": f"Saved merchant rule maps {merchant_name} to {rule_category}.",
         }
     return suggest_category(description, amount_cents, current_category)
 
@@ -554,17 +561,22 @@ def update_transaction_category(transaction_id: int, category: str, remember: bo
         if row is None:
             return None
 
-        merchant_key = normalize_text(row["description"])
         if remember:
             upsert_merchant_rule(conn, row["description"], category)
+            target_merchant_key = merchant_key(row["description"])
+            matching_ids = [
+                item["id"]
+                for item in conn.execute("SELECT id, description FROM transactions").fetchall()
+                if merchant_key(item["description"]) == target_merchant_key
+            ]
+            placeholders = ", ".join("?" for _ in matching_ids)
             conn.execute(
-                """
+                f"""
                 UPDATE transactions
                 SET category = ?
-                WHERE id = ?
-                   OR lower(trim(description)) = ?
+                WHERE id IN ({placeholders})
                 """,
-                (category, transaction_id, merchant_key),
+                [category, *matching_ids],
             )
         else:
             conn.execute(
@@ -590,6 +602,7 @@ def update_transaction_category(transaction_id: int, category: str, remember: bo
 
 def upsert_merchant_rule(conn: sqlite3.Connection, merchant_name: str, category: str) -> None:
     """Insert or update an exact merchant category rule."""
+    cleaned_name = clean_merchant_description(merchant_name)
     conn.execute(
         """
         INSERT INTO merchant_rules (merchant_key, merchant_name, category)
@@ -599,7 +612,7 @@ def upsert_merchant_rule(conn: sqlite3.Connection, merchant_name: str, category:
             category = excluded.category,
             updated_at = CURRENT_TIMESTAMP
         """,
-        (normalize_text(merchant_name), merchant_name, category),
+        (merchant_key(cleaned_name), cleaned_name, category),
     )
 
 
@@ -1299,29 +1312,43 @@ def top_merchants(month: str | None = None, limit: int = 10) -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
             f"""
-            SELECT
-                description,
-                category,
-                COALESCE(SUM(ABS(amount_cents)), 0) AS total_cents,
-                COUNT(*) AS transaction_count
+            SELECT description, category, amount_cents
             FROM transactions
             {where_sql}
               {"AND" if where_sql else "WHERE"} amount_cents < 0
-            GROUP BY description, category
-            ORDER BY total_cents DESC
-            LIMIT ?
+            ORDER BY transaction_date DESC, id DESC
             """,
-            [*params, limit],
+            params,
         ).fetchall()
 
+    grouped: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        cleaned_name = clean_merchant_description(row["description"])
+        key = (merchant_key(cleaned_name), row["category"])
+        bucket = grouped.setdefault(
+            key,
+            {
+                "merchant": cleaned_name,
+                "category": row["category"],
+                "total_cents": 0,
+                "transaction_count": 0,
+            },
+        )
+        bucket["total_cents"] += abs(int(row["amount_cents"]))
+        bucket["transaction_count"] += 1
+
+    ranked = sorted(
+        grouped.values(),
+        key=lambda item: (-item["total_cents"], -item["transaction_count"], item["merchant"]),
+    )
     return [
         {
-            "merchant": row["description"],
-            "category": row["category"],
-            "total": cents_to_dollars(row["total_cents"]),
-            "transaction_count": row["transaction_count"],
+            "merchant": item["merchant"],
+            "category": item["category"],
+            "total": cents_to_dollars(item["total_cents"]),
+            "transaction_count": item["transaction_count"],
         }
-        for row in rows
+        for item in ranked[:limit]
     ]
 
 
@@ -1357,7 +1384,7 @@ def recurring_charges(limit: int = 10, min_occurrences: int = 3) -> list[dict]:
 
     grouped: dict[str, list[sqlite3.Row]] = {}
     for row in rows:
-        grouped.setdefault(normalize_text(row["description"]), []).append(row)
+        grouped.setdefault(merchant_key(row["description"]), []).append(row)
 
     charges = []
     for items in grouped.values():
@@ -1387,7 +1414,7 @@ def recurring_charges(limit: int = 10, min_occurrences: int = 3) -> list[dict]:
         next_expected_date = (parsed_dates[-1] + timedelta(days=expected_gap)).isoformat()
 
         charges.append({
-            "merchant": items[-1]["description"],
+            "merchant": clean_merchant_description(items[-1]["description"]),
             "category": items[-1]["category"],
             "average_amount": cents_to_dollars(average_cents),
             "total_amount": cents_to_dollars(total_cents),
@@ -2316,11 +2343,12 @@ def _transaction_question_score(row: sqlite3.Row, tokens: list[str], question: s
 
     normalized_question = normalize_text(question)
     description = normalize_text(row["description"])
+    merchant = normalize_text(clean_merchant_description(row["description"]))
     category = normalize_text(row["category"])
     source_file = normalize_text(row["source_file"] or "")
     score = 0
     for token in tokens:
-        if token in description:
+        if token in description or token in merchant:
             score += 4
         if token in category:
             score += 3
@@ -2328,6 +2356,8 @@ def _transaction_question_score(row: sqlite3.Row, tokens: list[str], question: s
             score += 1
 
     if description and description in normalized_question:
+        score += 6
+    if merchant and merchant != description and merchant in normalized_question:
         score += 6
     if int(row["amount_cents"]) < 0 and any(term in normalized_question for term in ["expense", "charge", "purchase"]):
         score += 1

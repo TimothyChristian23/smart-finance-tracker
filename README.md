@@ -12,6 +12,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Reviewed import flow with editable preview categories before saving
 - Manual transaction entry for cash purchases or one-off corrections
 - Flexible CSV parsing for common bank column names and debit/credit formats
+- Merchant cleanup for noisy bank descriptors and payment reference codes
 - Optional account labels for statement imports and transaction filtering
 - Account-level spending, income, and net summaries
 - Upload history with imported and duplicate counts
@@ -19,7 +20,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Explainable starter categorization with confidence, source, and matched merchant signals
 - Editable transaction categories
 - Category review queue with confidence-scored suggestions
-- Saved merchant rules that apply to future imports
+- Saved normalized merchant rules that apply to future imports
 - Editable transaction details for date, description, signed amount, category, and account
 - Individual transaction deletion with confirmation
 - Monthly category budgets with live progress
@@ -182,6 +183,9 @@ CSV imports accept common bank-style headers such as `Date`, `Posting Date`,
 are stored as expenses even when the export already includes a minus sign or
 parentheses, and unsigned amount columns can use a `Type` column for debit/credit
 direction.
+Imported statement descriptors are cleaned into stable merchant names before
+categorization, duplicate checks, recurring-charge detection, merchant summaries,
+and saved merchant rules run.
 Use the dashboard account label field or CSV headers like `Account` and
 `Account Name` to track which account a statement came from. Transaction list and
 CSV export requests can filter by account with `account=Chase%20Checking`.
@@ -197,8 +201,8 @@ file and `confirmation=RESTORE` to replace local data from a backup.
 The dashboard Privacy panel can reset all local app records after typing `RESET`;
 the API requires the same confirmation with `DELETE /data?confirmation=RESET`.
 
-Recurring charge detection needs the same merchant to appear across multiple months,
-so it becomes useful after importing a few statements. Upload
+Recurring charge detection needs the same normalized merchant to appear across
+multiple months, so it becomes useful after importing a few statements. Upload
 `data/sample_recurring_transactions.csv` if you want demo recurring charges right away.
 
 Monthly insight reports combine summary totals, budget progress, recurring charges,

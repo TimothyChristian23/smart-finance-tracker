@@ -14,7 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
-from app.categorization import CATEGORY_OPTIONS, categories_from_question, categorize_transaction
+from app.categorization import (
+    CATEGORY_OPTIONS,
+    categories_from_question,
+    categorize_transaction,
+    clean_merchant_description,
+)
 from app.database import (
     account_summary,
     available_months,
@@ -1170,7 +1175,7 @@ def parse_transactions_csv_rows(content: str, source_file: str, collect_errors: 
             continue
         try:
             parsed_date = parse_date(get_column(raw_row, DATE_COLUMNS))
-            description = get_column(raw_row, DESCRIPTION_COLUMNS)
+            description = clean_merchant_description(get_column(raw_row, DESCRIPTION_COLUMNS))
             amount_cents = parse_amount(raw_row)
         except ValueError as exc:
             message = f"Row {row_number}: {exc}"
@@ -1267,7 +1272,7 @@ def parse_statement_text_line(line: str, has_balance_column: bool = False) -> di
     amount_group = "first" if has_balance_column and amount_match.group("second") else "second"
     amount_text = amount_match.group(amount_group) or amount_match.group("first")
     description_end = amount_match.start(amount_group) if amount_match.group(amount_group) else amount_match.start("first")
-    description = body[:description_end].strip()
+    description = clean_merchant_description(body[:description_end].strip())
     if not description:
         raise ValueError("missing transaction description")
 
@@ -1444,7 +1449,7 @@ def reviewed_import_rows(
             account_name = account_override if account_override is not None else validate_account_name(row.account_name)
             rows.append({
                 "date": validate_transaction_date(row.date),
-                "description": validate_transaction_description(row.description),
+                "description": clean_merchant_description(validate_transaction_description(row.description)),
                 "amount_cents": dollars_to_cents(row.amount),
                 "category": validate_category(row.category),
                 "source_file": filename,
