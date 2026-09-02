@@ -212,6 +212,7 @@ def test_data_export_backup_includes_local_finance_records():
         "uploads": 1,
         "merchant_rules": 1,
         "budgets": 1,
+        "ask_history": 0,
         "months": 1,
     }
     assert payload["summary"]["total_spending"] == 2840.87
@@ -367,6 +368,34 @@ def test_ask_food_question_uses_exact_transaction_totals():
     assert payload["amount"] == 426.67
     assert payload["categories"] == ["Food & Grocery", "Dining"]
     assert "You spent $426.67" in payload["answer"]
+
+
+def test_ask_history_records_recent_answers():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    food_question = "How much did I spend on food in 2026-07?"
+    income_question = "What was my income in 2026-07?"
+
+    client.post("/ask", json={"question": food_question})
+    client.post("/ask", json={"question": income_question})
+
+    response = client.get("/ask/history")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["question"] for item in payload] == [income_question, food_question]
+    assert payload[0]["answer"] == "Your income for 2026-07 was $3,200.00."
+    assert payload[0]["amount"] == 3200.0
+    assert payload[0]["month"] == "2026-07"
+    assert payload[0]["intent"] == "income"
+    assert payload[1]["amount"] == 426.67
+    assert payload[1]["categories"] == ["Food & Grocery", "Dining"]
+
+    limited = client.get("/ask/history?limit=1").json()
+    assert [item["question"] for item in limited] == [income_question]
+
+    backup = client.get("/data/export").json()
+    assert backup["counts"]["ask_history"] == 2
+    assert backup["ask_history"][0]["question"] == income_question
 
 
 def test_anomalies_include_large_category_outlier():

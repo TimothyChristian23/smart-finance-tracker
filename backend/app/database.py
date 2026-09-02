@@ -1,6 +1,7 @@
 """SQLite storage and analytics helpers."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -150,6 +151,26 @@ def init_db(conn: sqlite3.Connection) -> None:
             last_transaction_date TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ask_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            amount REAL,
+            categories_json TEXT NOT NULL DEFAULT '[]',
+            month TEXT,
+            intent TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_ask_history_id
+        ON ask_history (id)
         """
     )
     conn.commit()
@@ -582,6 +603,7 @@ def export_backup() -> dict:
     uploads = list_uploads(limit=100000)
     merchant_rules = list_merchant_rules()
     budgets = list_all_budgets()
+    ask_history = list_ask_history(limit=100000)
     months = available_months()
     summary = monthly_summary(month=None)
 
@@ -593,6 +615,7 @@ def export_backup() -> dict:
             "uploads": len(uploads),
             "merchant_rules": len(merchant_rules),
             "budgets": len(budgets),
+            "ask_history": len(ask_history),
             "months": len(months),
         },
         "summary": summary,
@@ -600,6 +623,7 @@ def export_backup() -> dict:
         "transactions": transactions,
         "budgets": budgets,
         "merchant_rules": merchant_rules,
+        "ask_history": ask_history,
         "uploads": uploads,
     }
 
@@ -619,6 +643,49 @@ def list_all_budgets() -> list[dict]:
     for row in months:
         budgets.extend(budget_progress(row["month"]))
     return budgets
+
+
+def record_ask_history(
+    *,
+    question: str,
+    answer: str,
+    amount: float | None,
+    categories: list[str],
+    month: str | None,
+    intent: str,
+) -> None:
+    """Persist a compact record of a finance Q&A exchange."""
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO ask_history (question, answer, amount, categories_json, month, intent)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                question,
+                answer,
+                float(amount) if amount is not None else None,
+                json.dumps(categories),
+                month,
+                intent,
+            ),
+        )
+        conn.commit()
+
+
+def list_ask_history(limit: int = 20) -> list[dict]:
+    """Return recent finance Q&A history."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, question, answer, amount, categories_json, month, intent, created_at
+            FROM ask_history
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [_ask_history_row_to_dict(row) for row in rows]
 
 
 def category_review_queue(month: str | None = None, limit: int = 20) -> list[dict]:
@@ -1278,6 +1345,24 @@ def _merchant_rule_row_to_dict(row: sqlite3.Row) -> dict:
         "merchant_key": row["merchant_key"],
         "category": row["category"],
         "updated_at": row["updated_at"],
+    }
+
+
+def _ask_history_row_to_dict(row: sqlite3.Row) -> dict:
+    try:
+        categories = json.loads(row["categories_json"] or "[]")
+    except json.JSONDecodeError:
+        categories = []
+
+    return {
+        "id": row["id"],
+        "question": row["question"],
+        "answer": row["answer"],
+        "amount": row["amount"],
+        "categories": categories,
+        "month": row["month"],
+        "intent": row["intent"],
+        "created_at": row["created_at"],
     }
 
 

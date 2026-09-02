@@ -66,6 +66,7 @@ export default function App() {
   const [uploadStatus, setUploadStatus] = useState("");
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [answer, setAnswer] = useState(null);
+  const [askHistory, setAskHistory] = useState([]);
   const [busy, setBusy] = useState(false);
   const [updatingTransactionId, setUpdatingTransactionId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState("");
@@ -100,6 +101,7 @@ export default function App() {
         budgetRecommendationPayload,
         recurringPayload,
         uploadPayload,
+        askHistoryPayload,
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
         request(`/insights/monthly${queryString({ month: activeMonth })}`),
@@ -122,6 +124,7 @@ export default function App() {
         request(`/budgets/recommendations${queryString({ month: activeMonth, limit: 6 })}`),
         request("/recurring?limit=6"),
         request("/uploads?limit=6"),
+        request("/ask/history?limit=5"),
       ]);
 
       setMonths(monthsPayload);
@@ -141,6 +144,7 @@ export default function App() {
       setBudgetRecommendations(budgetRecommendationPayload);
       setRecurringCharges(recurringPayload);
       setUploads(uploadPayload);
+      setAskHistory(askHistoryPayload);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
     } catch (error) {
       setHealth("Offline");
@@ -224,6 +228,7 @@ export default function App() {
         body: JSON.stringify({ question }),
       });
       setAnswer(payload);
+      setAskHistory(await request("/ask/history?limit=5"));
     } catch (error) {
       setAnswer({ answer: error.message, data: [] });
     } finally {
@@ -525,6 +530,7 @@ export default function App() {
             <button type="submit" disabled={busy}>Ask</button>
           </form>
           {answer && <AnswerCard answer={answer} />}
+          <AskHistoryList history={askHistory} onSelect={(item) => setQuestion(item.question)} />
         </section>
 
         <section className="panel">
@@ -918,6 +924,29 @@ function AnswerCard({ answer }) {
       {!!answer.data?.length && <small>{answer.data.length} supporting result{answer.data.length === 1 ? "" : "s"}</small>}
     </div>
   );
+}
+
+function AskHistoryList({ history, onSelect }) {
+  if (!history.length) {
+    return <p className="empty">No recent questions.</p>;
+  }
+
+  return (
+    <div className="ask-history" aria-label="Recent questions">
+      {history.map((item) => (
+        <button className="history-question" key={item.id} onClick={() => onSelect(item)} type="button">
+          <span>{item.question}</span>
+          <small>{formatHistoryMeta(item)}</small>
+          <em>{item.answer}</em>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function formatHistoryMeta(item) {
+  const intent = item.intent.replaceAll("_", " ");
+  return item.month ? `${intent} - ${item.month}` : intent;
 }
 
 function TransactionFilters({ categoryOptions, filters, onChange, onClear, onExport, total }) {

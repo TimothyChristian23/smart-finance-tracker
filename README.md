@@ -27,6 +27,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Basic anomaly detection
 - Deterministic question answering for spending, income, category, merchant, budget, budget recommendation, forecast, recurring charge, monthly report, largest expense, and anomaly questions
 - RAG-style broad Q&A with cited transaction and summary evidence
+- Local Q&A history for recent finance questions and answers
 - React dashboard scaffold
 - Locked frontend dependency install and production build
 - GitHub Actions backend test and frontend build workflows
@@ -123,6 +124,7 @@ POST /transactions/preview
 GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
 GET  /data/export
+GET  /ask/history
 GET  /categories?month=2026-07
 GET  /categories/review?month=2026-07
 GET  /category-options
@@ -174,6 +176,7 @@ or apply a recommendation directly from the dashboard.
 
 Broad Q&A questions retrieve relevant transaction evidence and return citations in
 the answer card. Exact totals still come from deterministic database calculations.
+Recent Q&A exchanges are saved locally and included in full JSON backups.
 
 The category review queue surfaces uncertain imported categories and suggests a
 more likely category when the rule hints have enough signal. Applying a suggestion

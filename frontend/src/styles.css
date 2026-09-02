@@ -409,6 +409,49 @@ h2 {
   white-space: nowrap;
 }
 
+.ask-history {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.history-question {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 72px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.history-question span {
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.history-question small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: capitalize;
+}
+
+.history-question em {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-style: normal;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .import-preview {
   display: grid;
   gap: 10px;

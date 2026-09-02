@@ -28,6 +28,7 @@ from app.database import (
     export_backup,
     insert_transactions,
     largest_expenses,
+    list_ask_history,
     list_merchant_rules,
     list_transactions,
     list_uploads,
@@ -38,6 +39,7 @@ from app.database import (
     monthly_trends,
     preview_import,
     record_upload,
+    record_ask_history,
     recurring_charges,
     reset_db,
     spending_for_categories,
@@ -248,6 +250,17 @@ class AskResponse(BaseModel):
     intent: str = "unknown"
     data: list[dict] = Field(default_factory=list)
     citations: list[dict] = Field(default_factory=list)
+
+
+class AskHistoryResponse(BaseModel):
+    id: int
+    question: str
+    answer: str
+    amount: float | None = None
+    categories: list[str] = Field(default_factory=list)
+    month: str | None = None
+    intent: str
+    created_at: str
 
 
 MONTH_ALIASES = {
@@ -477,10 +490,32 @@ async def recurring(limit: int = 10) -> list[dict]:
     return recurring_charges(limit=bounded_limit(limit))
 
 
+@app.get("/ask/history", response_model=list[AskHistoryResponse])
+async def ask_history(limit: int = 10) -> list[dict]:
+    return list_ask_history(limit=bounded_limit(limit, maximum=50))
+
+
 @app.post("/ask", response_model=AskResponse)
 async def ask(request: AskRequest) -> AskResponse:
-    """Answer a simple spending question from structured transaction data."""
+    """Answer a finance question and remember the exchange locally."""
     question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question cannot be empty.")
+
+    response = answer_finance_question(question)
+    record_ask_history(
+        question=question,
+        answer=response.answer,
+        amount=response.amount,
+        categories=response.categories,
+        month=response.month,
+        intent=response.intent,
+    )
+    return response
+
+
+def answer_finance_question(question: str) -> AskResponse:
+    """Answer a simple spending question from structured transaction data."""
     normalized = question.lower()
     categories = categories_from_question(question)
     month = infer_month(question)
