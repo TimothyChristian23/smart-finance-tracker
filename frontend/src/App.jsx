@@ -18,6 +18,7 @@ import {
   Repeat2,
   RefreshCw,
   Search,
+  Shield,
   Store,
   Tags,
   Target,
@@ -67,11 +68,13 @@ export default function App() {
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [answer, setAnswer] = useState(null);
   const [askHistory, setAskHistory] = useState([]);
+  const [resetConfirmation, setResetConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [updatingTransactionId, setUpdatingTransactionId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState("");
 
   const selectedMonthLabel = month || "All imported data";
+  const hasLocalData = Boolean(months.length || uploads.length || budgets.length || merchantRules.length || askHistory.length);
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -246,6 +249,33 @@ export default function App() {
       setAnswer(null);
       setMonth("");
       setUploadPreview(null);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResetLocalData(event) {
+    event.preventDefault();
+    if (resetConfirmation !== "RESET") {
+      setUploadStatus("Type RESET first.");
+      return;
+    }
+    if (!window.confirm("Reset all local finance data? This deletes transactions, upload history, budgets, merchant rules, and Q&A history.")) return;
+
+    setBusy(true);
+    try {
+      await request(`/data${queryString({ confirmation: resetConfirmation })}`, { method: "DELETE" });
+      setUploadStatus("All local finance data cleared.");
+      setAnswer(null);
+      setMonth("");
+      setUploadPreview(null);
+      setAskHistory([]);
+      setBudgetDraft({ category: "", amount: "" });
+      setTransactionFilters({ category: "", search: "" });
+      setResetConfirmation("");
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -521,6 +551,23 @@ export default function App() {
         <section className="panel uploads-panel">
           <PanelTitle icon={<History size={18} />} title="Import History" detail={`${uploads.length} recent`} />
           <UploadHistoryList uploads={uploads} />
+        </section>
+
+        <section className="panel privacy-panel">
+          <PanelTitle icon={<Shield size={18} />} title="Privacy" detail="Local data" />
+          <form className="privacy-form" onSubmit={handleResetLocalData}>
+            <input
+              aria-label="Reset confirmation"
+              autoComplete="off"
+              onChange={(event) => setResetConfirmation(event.target.value)}
+              placeholder="RESET"
+              value={resetConfirmation}
+            />
+            <button className="danger-action" type="submit" disabled={busy || !hasLocalData || resetConfirmation !== "RESET"}>
+              <Trash2 size={16} />
+              Reset Data
+            </button>
+          </form>
         </section>
 
         <section className="panel ask-panel">

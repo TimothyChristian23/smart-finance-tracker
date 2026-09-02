@@ -20,6 +20,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Recurring charge and subscription detection
 - Transaction search, category filtering, and CSV export
 - Full local JSON backup export for transactions, uploads, budgets, and merchant rules
+- Guarded local data reset with typed confirmation
 - Monthly spending summaries
 - Monthly insight reports with highlights, risks, and next actions
 - Cash-flow forecasts from imported activity and upcoming recurring charges
@@ -140,6 +141,7 @@ PUT  /budgets
 PATCH /transactions/{id}/category
 DELETE /budgets/{id}
 DELETE /merchant-rules/{id}
+DELETE /data?confirmation=RESET
 POST /ask
 ```
 
@@ -157,6 +159,8 @@ saving statement data.
 
 Use `GET /data/export` or the dashboard Backup button to download a JSON snapshot
 of local finance data before clearing or moving development databases.
+The dashboard Privacy panel can reset all local app records after typing `RESET`;
+the API requires the same confirmation with `DELETE /data?confirmation=RESET`.
 
 Recurring charge detection needs the same merchant to appear across multiple months,
 so it becomes useful after importing a few statements. Upload

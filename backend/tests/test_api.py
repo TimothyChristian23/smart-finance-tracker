@@ -226,6 +226,48 @@ def test_data_export_backup_includes_local_finance_records():
     )
 
 
+def test_clear_all_data_requires_confirmation_and_removes_local_records():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Trader Joes"
+    )
+    client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": True},
+    )
+    client.put(
+        "/budgets",
+        json={"month": "2026-07", "category": "Dining", "amount": 200},
+    )
+    client.post("/ask", json={"question": "How much did I spend on food in 2026-07?"})
+
+    rejected = client.delete("/data")
+
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "Type RESET to clear all local finance data."
+    assert client.get("/data/export").json()["counts"]["transactions"] == 11
+
+    response = client.delete("/data", params={"confirmation": "RESET"})
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "All local finance data cleared."}
+    backup = client.get("/data/export").json()
+    assert backup["counts"] == {
+        "transactions": 0,
+        "uploads": 0,
+        "merchant_rules": 0,
+        "budgets": 0,
+        "ask_history": 0,
+        "months": 0,
+    }
+    assert client.get("/transactions").json() == []
+    assert client.get("/uploads").json() == []
+    assert client.get("/merchant-rules").json() == []
+    assert client.get("/budgets?month=2026-07").json() == []
+    assert client.get("/ask/history").json() == []
+
+
 def test_update_transaction_category_recalculates_summary():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = next(

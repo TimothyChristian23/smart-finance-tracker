@@ -184,6 +184,17 @@ def reset_db() -> None:
         conn.commit()
 
 
+def reset_all_data() -> None:
+    """Delete all locally stored finance records."""
+    with connect() as conn:
+        conn.execute("DELETE FROM transactions")
+        conn.execute("DELETE FROM upload_history")
+        conn.execute("DELETE FROM merchant_rules")
+        conn.execute("DELETE FROM budgets")
+        conn.execute("DELETE FROM ask_history")
+        conn.commit()
+
+
 def insert_transactions(rows: list[dict]) -> dict:
     """Insert parsed transactions and return inserted/skipped counts."""
     result = {"inserted": 0, "skipped": 0}

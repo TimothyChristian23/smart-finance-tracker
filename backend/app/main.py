@@ -41,6 +41,7 @@ from app.database import (
     record_upload,
     record_ask_history,
     recurring_charges,
+    reset_all_data,
     reset_db,
     spending_for_categories,
     top_merchants,
@@ -845,6 +846,15 @@ def answer_finance_question(question: str) -> AskResponse:
 async def clear_transactions() -> dict:
     reset_db()
     return {"message": "Transactions cleared."}
+
+
+@app.delete("/data")
+async def clear_all_data(confirmation: str | None = None) -> dict:
+    if confirmation != "RESET":
+        raise HTTPException(status_code=400, detail="Type RESET to clear all local finance data.")
+
+    reset_all_data()
+    return {"message": "All local finance data cleared."}
 
 
 async def parse_uploaded_statement(file: UploadFile) -> tuple[str, str, list[dict]]:

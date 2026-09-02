@@ -24,7 +24,8 @@ should stay deterministic.
 
 Users can export a full local JSON backup that includes transactions, upload
 history, budgets, merchant rules, Q&A history, monthly summaries, and counts.
-Destructive data management should stay explicit and clearly scoped.
+Full local reset requires a typed `RESET` confirmation in both the dashboard and
+API, then clears transactions, uploads, budgets, merchant rules, and Q&A history.
 
 ## Future AI Layer
 
