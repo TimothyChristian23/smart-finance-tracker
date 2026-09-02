@@ -76,6 +76,7 @@ export default function App() {
   const [editDraft, setEditDraft] = useState(emptyTransactionDraft());
   const [busy, setBusy] = useState(false);
   const [updatingTransactionId, setUpdatingTransactionId] = useState(null);
+  const [deletingTransactionId, setDeletingTransactionId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState("");
 
   const selectedMonthLabel = month || "All imported data";
@@ -371,6 +372,21 @@ export default function App() {
       setUploadStatus(error.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleDeleteTransaction(transaction) {
+    if (!window.confirm(`Delete ${transaction.description}?`)) return;
+
+    setDeletingTransactionId(transaction.id);
+    try {
+      await request(`/transactions/${transaction.id}`, { method: "DELETE" });
+      setUploadStatus(`Deleted ${transaction.description}.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setDeletingTransactionId(null);
     }
   }
 
@@ -694,11 +710,13 @@ export default function App() {
           <div className="table-heading">Description</div>
           <div className="table-heading">Category</div>
           <div className="table-heading align-right">Amount</div>
-          <div className="table-heading align-center">Edit</div>
+          <div className="table-heading align-center">Actions</div>
           {visibleTransactions.map((transaction) => (
             <TransactionRow
               categoryOptions={categoryOptions}
               key={transaction.id}
+              deleting={deletingTransactionId === transaction.id}
+              onDelete={handleDeleteTransaction}
               onEdit={handleOpenTransactionEditor}
               onCategoryChange={handleCategoryChange}
               transaction={transaction}
@@ -1155,8 +1173,9 @@ function TransactionFilters({ accounts, busy, categoryOptions, filters, onAdd, o
   );
 }
 
-function TransactionRow({ categoryOptions, onCategoryChange, onEdit, transaction, updating }) {
+function TransactionRow({ categoryOptions, deleting, onCategoryChange, onDelete, onEdit, transaction, updating }) {
   const sourceLabel = transaction.account_name || transaction.source_file || "Unlabeled";
+  const actionsDisabled = deleting || updating;
 
   return (
     <>
@@ -1180,11 +1199,22 @@ function TransactionRow({ categoryOptions, onCategoryChange, onEdit, transaction
         <button
           aria-label={`Edit ${transaction.description}`}
           className="row-icon-button"
+          disabled={actionsDisabled}
           onClick={() => onEdit(transaction)}
           title="Edit transaction"
           type="button"
         >
           <Pencil size={15} />
+        </button>
+        <button
+          aria-label={`Delete ${transaction.description}`}
+          className="row-icon-button danger-row-button"
+          disabled={actionsDisabled}
+          onClick={() => onDelete(transaction)}
+          title="Delete transaction"
+          type="button"
+        >
+          <Trash2 size={15} />
         </button>
       </div>
     </>

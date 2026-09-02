@@ -25,6 +25,7 @@ from app.database import (
     create_transaction,
     delete_budget,
     delete_merchant_rule,
+    delete_transaction,
     detect_anomalies,
     export_backup,
     get_transaction,
@@ -535,6 +536,13 @@ async def update_transaction(transaction_id: int, request: TransactionUpdateRequ
     if updated is None:
         raise HTTPException(status_code=404, detail="Transaction not found.")
     return updated
+
+
+@app.delete("/transactions/{transaction_id}")
+async def remove_transaction(transaction_id: int) -> dict:
+    if not delete_transaction(transaction_id):
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    return {"message": "Transaction deleted."}
 
 
 @app.get("/category-options", response_model=list[str])

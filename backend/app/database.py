@@ -769,6 +769,20 @@ def update_transaction_details(
     return _transaction_row_to_dict(row)
 
 
+def delete_transaction(transaction_id: int) -> bool:
+    """Delete one transaction by id."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+
 def export_backup() -> dict:
     """Return a complete JSON-serializable snapshot of local finance data."""
     transactions = list_transactions(limit=100000)

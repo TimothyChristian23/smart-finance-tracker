@@ -966,7 +966,7 @@ h2 {
 
 .transaction-table {
   display: grid;
-  grid-template-columns: 120px minmax(220px, 1fr) 230px 120px 56px;
+  grid-template-columns: 120px minmax(220px, 1fr) 230px 120px 86px;
   gap: 0;
   margin-top: 12px;
   overflow-x: auto;
@@ -1011,8 +1011,10 @@ h2 {
 }
 
 .transaction-actions {
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .category-pill {
@@ -1059,6 +1061,15 @@ h2 {
 .row-icon-button:hover:not(:disabled) {
   border-color: rgba(36, 120, 106, 0.46);
   color: var(--accent-dark);
+}
+
+.danger-row-button {
+  color: var(--bad);
+}
+
+.danger-row-button:hover:not(:disabled) {
+  border-color: rgba(180, 35, 24, 0.42);
+  color: var(--bad);
 }
 
 .modal-backdrop {
@@ -1253,7 +1264,7 @@ h2 {
   }
 
   .transaction-table {
-    grid-template-columns: 110px 200px 220px 105px 56px;
+    grid-template-columns: 110px 200px 220px 105px 86px;
   }
 
   .transaction-edit-form {

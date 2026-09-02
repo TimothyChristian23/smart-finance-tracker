@@ -383,6 +383,30 @@ def test_update_transaction_details_validates_inputs():
     assert client.patch("/transactions/999999", json={"description": "Missing"}).status_code == 404
 
 
+def test_delete_transaction_recalculates_analytics():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Amazon Marketplace"
+    )
+
+    response = client.delete(f"/transactions/{transaction['id']}")
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "Transaction deleted."}
+    assert client.delete(f"/transactions/{transaction['id']}").status_code == 404
+
+    summary = client.get("/summary?month=2026-07").json()
+    assert summary["transaction_count"] == 10
+    assert summary["total_spending"] == 2775.67
+
+    descriptions = [
+        item["description"]
+        for item in client.get("/transactions", params={"limit": 20}).json()
+    ]
+    assert "Amazon Marketplace" not in descriptions
+
+
 def test_data_export_backup_includes_local_finance_records():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = next(
