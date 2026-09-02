@@ -6,7 +6,7 @@ AI-ready product surface.
 ## MVP Flow
 
 1. A user uploads or previews a CSV bank statement or text-based PDF statement.
-2. The backend parses common CSV columns or extracts transaction-like rows from PDF text.
+2. The backend parses common CSV columns, common bank-specific CSV aliases, debit/credit split columns, and transaction-like rows from PDF text.
 3. Preview requests return normalized rows, category assignments, totals, date ranges, and duplicate estimates without saving data.
 4. Import requests normalize transactions into SQLite with cent-based amounts, and each successful upload is logged with imported and duplicate counts.
 5. Starter categorization rules assign categories from merchant descriptions.

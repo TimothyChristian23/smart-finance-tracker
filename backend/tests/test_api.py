@@ -776,8 +776,40 @@ def test_parse_transactions_csv_supports_debit_credit_columns():
     assert rows[1]["amount_cents"] == 410
 
 
+def test_parse_transactions_csv_supports_common_bank_aliases_and_signs():
+    csv_content = """Posting Date,Transaction Description,Debit Amount,Credit Amount,Transaction Type,Spending Category
+07/01/2026,Payroll Deposit,,"$3,200.00",Credit,
+07/02/2026,Trader Joes,$86.42,,Debit,
+07/03/2026,Apartment Rent,-1450.00,,Debit,
+07/04/2026,Blue Bottle Coffee,($6.75),,Debit,Dining
+,,,,,
+"""
+
+    rows = parse_transactions_csv(csv_content, "bank-export.csv")
+
+    assert len(rows) == 4
+    assert [row["date"] for row in rows] == ["2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04"]
+    assert [row["amount_cents"] for row in rows] == [320000, -8642, -145000, -675]
+    assert rows[1]["category"] == "Food & Grocery"
+    assert rows[3]["category"] == "Dining"
+
+
+def test_parse_transactions_csv_uses_type_for_unsigned_amounts():
+    csv_content = """Trans Date,Payee,Transaction Amount,Type
+07/01/26,Amazon Marketplace,65.20,Debit
+07/02/26,Payroll Deposit,3200.00,Credit
+"""
+
+    rows = parse_transactions_csv(csv_content, "typed-export.csv")
+
+    assert rows[0]["date"] == "2026-07-01"
+    assert rows[0]["amount_cents"] == -6520
+    assert rows[1]["amount_cents"] == 320000
+
+
 def test_money_to_cents_handles_parentheses():
     assert money_to_cents("($42.19)") == -4219
+    assert money_to_cents("42.19-") == -4219
 
 
 def test_infer_month_supports_named_months():

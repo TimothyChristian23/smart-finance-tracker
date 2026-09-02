@@ -9,6 +9,7 @@ The first implementation slice focuses on trustworthy analytics:
 - CSV transaction upload
 - Text-based PDF statement upload
 - Import preview with duplicate estimates before saving
+- Flexible CSV parsing for common bank column names and debit/credit formats
 - Upload history with imported and duplicate counts
 - SQLite transaction storage
 - Rule-based starter categorization
@@ -156,6 +157,12 @@ Statements that are scanned images will need OCR support before they can be impo
 Use import preview from the dashboard or `POST /transactions/preview` to inspect
 normalized rows, category assignments, totals, and duplicate estimates before
 saving statement data.
+CSV imports accept common bank-style headers such as `Date`, `Posting Date`,
+`Transaction Date`, `Description`, `Transaction Description`, `Payee`, `Memo`,
+`Amount`, `Transaction Amount`, `Debit Amount`, and `Credit Amount`. Debit values
+are stored as expenses even when the export already includes a minus sign or
+parentheses, and unsigned amount columns can use a `Type` column for debit/credit
+direction.
 
 Use `GET /data/export` or the dashboard Backup button to download a JSON snapshot
 of local finance data before clearing or moving development databases.

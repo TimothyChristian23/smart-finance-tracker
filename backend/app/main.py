@@ -291,6 +291,57 @@ MONTH_ALIASES = {
     "december": 12,
 }
 
+DATE_COLUMNS = [
+    "date",
+    "transaction date",
+    "posted date",
+    "posting date",
+    "post date",
+    "date posted",
+    "trans date",
+    "effective date",
+]
+DESCRIPTION_COLUMNS = [
+    "description",
+    "transaction description",
+    "merchant",
+    "merchant name",
+    "name",
+    "payee",
+    "memo",
+    "details",
+    "detail",
+    "narrative",
+]
+CATEGORY_COLUMNS = ["category", "type category", "spending category"]
+AMOUNT_COLUMNS = [
+    "amount",
+    "transaction amount",
+    "net amount",
+    "signed amount",
+]
+DEBIT_COLUMNS = [
+    "debit",
+    "debits",
+    "debit amount",
+    "withdrawal",
+    "withdrawals",
+    "withdrawal amount",
+    "charge",
+    "charges",
+]
+CREDIT_COLUMNS = [
+    "credit",
+    "credits",
+    "credit amount",
+    "deposit",
+    "deposits",
+    "deposit amount",
+]
+TYPE_COLUMNS = ["type", "transaction type", "debit/credit", "credit/debit"]
+DEBIT_TYPES = ["debit", "withdrawal", "purchase", "charge", "payment", "pos", "check"]
+CREDIT_TYPES = ["credit", "deposit", "payroll", "refund", "interest", "income"]
+
 
 @app.get("/health")
 async def health() -> dict:
@@ -879,14 +930,16 @@ def parse_transactions_csv(content: str, source_file: str) -> list[dict]:
 
     rows = []
     for row_number, raw_row in enumerate(reader, start=2):
+        if row_is_blank(raw_row):
+            continue
         try:
-            parsed_date = parse_date(get_column(raw_row, ["date", "transaction date", "posted date"]))
-            description = get_column(raw_row, ["description", "merchant", "name", "memo"])
+            parsed_date = parse_date(get_column(raw_row, DATE_COLUMNS))
+            description = get_column(raw_row, DESCRIPTION_COLUMNS)
             amount_cents = parse_amount(raw_row)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Row {row_number}: {exc}") from exc
 
-        category = get_column(raw_row, ["category"], required=False)
+        category = get_column(raw_row, CATEGORY_COLUMNS, required=False)
         rows.append({
             "date": parsed_date,
             "description": description,
@@ -899,6 +952,10 @@ def parse_transactions_csv(content: str, source_file: str) -> list[dict]:
         raise HTTPException(status_code=400, detail="CSV file does not contain any transactions.")
 
     return rows
+
+
+def row_is_blank(raw_row: dict) -> bool:
+    return not any(str(value).strip() for value in raw_row.values() if value is not None)
 
 
 def parse_transactions_pdf(content: bytes, source_file: str) -> list[dict]:
@@ -979,14 +1036,18 @@ def parse_statement_text_line(line: str, has_balance_column: bool = False) -> di
 
 
 def get_column(raw_row: dict, candidates: list[str], required: bool = True) -> str:
-    normalized = {key.strip().lower(): value for key, value in raw_row.items() if key}
+    normalized = {normalize_header(key): value for key, value in raw_row.items() if key}
     for candidate in candidates:
-        value = normalized.get(candidate)
+        value = normalized.get(normalize_header(candidate))
         if value and value.strip():
             return value.strip()
     if required:
         raise ValueError(f"missing required column: {'/'.join(candidates)}")
     return ""
+
+
+def normalize_header(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
 
 
 def parse_date(value: str) -> str:
@@ -1001,26 +1062,36 @@ def parse_date(value: str) -> str:
 
 
 def parse_amount(raw_row: dict) -> int:
-    debit = get_column(raw_row, ["debit", "withdrawal"], required=False)
-    credit = get_column(raw_row, ["credit", "deposit"], required=False)
+    debit = get_column(raw_row, DEBIT_COLUMNS, required=False)
+    credit = get_column(raw_row, CREDIT_COLUMNS, required=False)
     if debit or credit:
         if debit:
-            return -money_to_cents(debit)
-        return money_to_cents(credit)
+            return -abs(money_to_cents(debit))
+        return abs(money_to_cents(credit))
 
-    amount = get_column(raw_row, ["amount"])
-    return money_to_cents(amount)
+    amount = get_column(raw_row, AMOUNT_COLUMNS)
+    amount_cents = money_to_cents(amount)
+    transaction_type = get_column(raw_row, TYPE_COLUMNS, required=False).lower()
+    if transaction_type:
+        if has_any(transaction_type, DEBIT_TYPES):
+            return -abs(amount_cents)
+        if has_any(transaction_type, CREDIT_TYPES):
+            return abs(amount_cents)
+    return amount_cents
 
 
 def money_to_cents(value: str) -> int:
     cleaned = value.strip().replace("$", "").replace(",", "")
     is_parenthesized = cleaned.startswith("(") and cleaned.endswith(")")
+    has_trailing_minus = cleaned.endswith("-")
+    if has_trailing_minus:
+        cleaned = cleaned[:-1]
     cleaned = cleaned.strip("()")
     try:
         amount = Decimal(cleaned)
     except InvalidOperation as exc:
         raise ValueError(f"invalid amount '{value}'") from exc
-    if is_parenthesized:
+    if is_parenthesized or has_trailing_minus:
         amount = -amount
     return int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
