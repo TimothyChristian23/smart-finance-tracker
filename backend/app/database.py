@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from app.categorization import normalize_text, suggest_category
+from app.categorization import explain_category_source, normalize_text, suggest_category
 
 load_dotenv()
 
@@ -326,6 +326,12 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
         for row in rows:
             category = merchant_rule_for_description(conn, row["description"]) or row["category"]
             amount_cents = int(row["amount_cents"])
+            suggestion = category_suggestion_for_description(
+                conn,
+                row["description"],
+                amount_cents,
+                category,
+            )
             source_file = row.get("source_file")
             account_name = row.get("account_name")
             duplicate = transaction_exists(
@@ -359,6 +365,13 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
                 "description": row["description"],
                 "amount": cents_to_dollars(amount_cents),
                 "category": category,
+                "suggested_category": suggestion["category"],
+                "category_confidence": suggestion["confidence"],
+                "category_confidence_label": suggestion["confidence_label"],
+                "category_source": suggestion["source"],
+                "category_source_label": explain_category_source(suggestion["source"]),
+                "category_reason": suggestion["reason"],
+                "matched_terms": suggestion["matched_terms"],
                 "source_file": source_file,
                 "account_name": account_name,
                 "duplicate": duplicate,
@@ -490,6 +503,26 @@ def merchant_rule_for_description(conn: sqlite3.Connection, description: str) ->
         (normalize_text(description),),
     ).fetchone()
     return row["category"] if row else None
+
+
+def category_suggestion_for_description(
+    conn: sqlite3.Connection,
+    description: str,
+    amount_cents: int,
+    current_category: str,
+) -> dict:
+    """Return an explainable category suggestion, including saved-rule evidence."""
+    rule_category = merchant_rule_for_description(conn, description)
+    if rule_category:
+        return {
+            "category": rule_category,
+            "confidence": 0.99,
+            "confidence_label": "high",
+            "source": "saved_rule",
+            "matched_terms": [description],
+            "reason": f"Saved merchant rule maps {description} to {rule_category}.",
+        }
+    return suggest_category(description, amount_cents, current_category)
 
 
 def list_merchant_rules() -> list[dict]:
@@ -1014,6 +1047,7 @@ def list_ask_history(limit: int = 20) -> list[dict]:
 def category_review_queue(month: str | None = None, limit: int = 20) -> list[dict]:
     """Return transactions whose category could use review."""
     where_sql, params = _month_filter(month)
+    review_items = []
     with connect() as conn:
         rows = conn.execute(
             f"""
@@ -1026,34 +1060,97 @@ def category_review_queue(month: str | None = None, limit: int = 20) -> list[dic
             params,
         ).fetchall()
 
-    review_items = []
-    for row in rows:
-        if int(row["amount_cents"]) > 0:
-            continue
+        for row in rows:
+            if int(row["amount_cents"]) > 0:
+                continue
 
-        suggestion = suggest_category(row["description"], int(row["amount_cents"]), row["category"])
-        needs_review = (
-            row["category"] == "Other"
-            or suggestion["category"] != row["category"]
-        )
-        if not needs_review:
-            continue
+            suggestion = category_suggestion_for_description(
+                conn,
+                row["description"],
+                int(row["amount_cents"]),
+                row["category"],
+            )
+            needs_review = (
+                row["category"] == "Other"
+                or suggestion["category"] != row["category"]
+            )
+            if not needs_review:
+                continue
 
-        transaction = _transaction_row_to_dict(row)
-        review_items.append({
-            "transaction": transaction,
-            "current_category": row["category"],
-            "suggested_category": suggestion["category"],
-            "confidence": suggestion["confidence"],
-            "reason": suggestion["reason"],
-            "action": "update" if suggestion["category"] != row["category"] else "review",
-        })
+            transaction = _transaction_row_to_dict(row)
+            review_items.append({
+                "transaction": transaction,
+                "current_category": row["category"],
+                "suggested_category": suggestion["category"],
+                "confidence": suggestion["confidence"],
+                "confidence_label": suggestion["confidence_label"],
+                "category_source": suggestion["source"],
+                "category_source_label": explain_category_source(suggestion["source"]),
+                "matched_terms": suggestion["matched_terms"],
+                "reason": suggestion["reason"],
+                "action": "update" if suggestion["category"] != row["category"] else "review",
+            })
 
     action_priority = {"update": 1, "review": 0}
     return sorted(
         review_items,
         key=lambda item: (
             action_priority[item["action"]],
+            item["confidence"],
+            abs(item["transaction"]["amount"]),
+        ),
+        reverse=True,
+    )[:limit]
+
+
+def category_explanations_for_question(question: str, month: str | None = None, limit: int = 5) -> list[dict]:
+    """Return ranked transaction category explanations for a natural-language question."""
+    explanation_month = month or _latest_month()
+    where_sql, params = _month_filter(explanation_month)
+    tokens = _category_explanation_tokens(question)
+    explanations = []
+
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
+            FROM transactions
+            {where_sql}
+            ORDER BY transaction_date DESC, ABS(amount_cents) DESC
+            LIMIT 500
+            """,
+            params,
+        ).fetchall()
+
+        for row in rows:
+            score = _transaction_question_score(row, tokens, question)
+            if tokens and score <= 0:
+                continue
+
+            suggestion = category_suggestion_for_description(
+                conn,
+                row["description"],
+                int(row["amount_cents"]),
+                row["category"],
+            )
+            transaction = _transaction_row_to_dict(row)
+            explanations.append({
+                "transaction": transaction,
+                "current_category": row["category"],
+                "suggested_category": suggestion["category"],
+                "confidence": suggestion["confidence"],
+                "confidence_label": suggestion["confidence_label"],
+                "category_source": suggestion["source"],
+                "category_source_label": explain_category_source(suggestion["source"]),
+                "matched_terms": suggestion["matched_terms"],
+                "reason": suggestion["reason"],
+                "score": score,
+            })
+
+    return sorted(
+        explanations,
+        key=lambda item: (
+            item["score"],
             item["confidence"],
             abs(item["transaction"]["amount"]),
         ),
@@ -2160,6 +2257,28 @@ def _question_tokens(question: str) -> list[str]:
             continue
         tokens.append(token)
     return list(dict.fromkeys(tokens))
+
+
+def _category_explanation_tokens(question: str) -> list[str]:
+    ignored_terms = {
+        "assigned",
+        "categorised",
+        "categorize",
+        "categorized",
+        "category",
+        "classified",
+        "classify",
+        "confidence",
+        "explain",
+        "reason",
+        "suggest",
+        "suggested",
+    }
+    return [
+        token
+        for token in _question_tokens(question)
+        if token not in ignored_terms
+    ]
 
 
 def _rank_question_transactions(question: str, month: str, limit: int) -> list[dict]:

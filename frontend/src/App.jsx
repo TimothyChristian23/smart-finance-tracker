@@ -984,8 +984,10 @@ function CategoryReviewList({ busy, items, onApply }) {
         <div className={`category-review-row category-review-${item.action}`} key={item.transaction.id}>
           <div>
             <strong>{item.transaction.description}</strong>
-            <span>{item.current_category} to {item.suggested_category} | {Math.round(item.confidence * 100)}% confidence</span>
-            <small>{item.reason}</small>
+            <span>
+              {item.current_category} to {item.suggested_category} | {Math.round(item.confidence * 100)}% confidence
+            </span>
+            <small>{item.category_source_label || "Category signal"}: {item.reason}</small>
           </div>
           <div className="category-review-action">
             <b>{money(Math.abs(item.transaction.amount))}</b>
@@ -1134,7 +1136,10 @@ function ImportPreview({ preview }) {
           <div className={`preview-row ${row.duplicate ? "preview-duplicate" : ""}`} key={`${row.date}-${row.description}-${index}`}>
             <div>
               <strong>{row.description}</strong>
-              <span>{row.date} | {row.account_name || "Unlabeled"} | {row.category}</span>
+              <span>{row.date} | {row.account_name || "Unlabeled"} | {categoryPreviewLabel(row)}</span>
+              {row.category_reason && (
+                <small>{row.category_source_label || "Category signal"}: {row.category_reason}</small>
+              )}
             </div>
             <b>{money(row.amount)}</b>
           </div>
@@ -1175,7 +1180,7 @@ function AnswerCard({ answer }) {
   const citations = answer.citations || [];
 
   return (
-    <div className="answer">
+    <div className="answer" data-testid="answer-card">
       <strong>{answer.answer}</strong>
       {!!answer.categories?.length && <span>{answer.categories.join(" + ")}</span>}
       {!!citations.length && (
@@ -1567,6 +1572,14 @@ function money(value) {
     style: "currency",
     currency: "USD",
   }).format(Number(value) || 0);
+}
+
+function categoryPreviewLabel(row) {
+  const confidence = row.category_confidence ? `, ${Math.round(row.category_confidence * 100)}%` : "";
+  if (row.suggested_category && row.suggested_category !== row.category) {
+    return `${row.category} -> ${row.suggested_category}${confidence}`;
+  }
+  return `${row.category}${confidence}`;
 }
 
 function dateRange(upload) {

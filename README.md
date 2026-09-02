@@ -15,7 +15,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Account-level spending, income, and net summaries
 - Upload history with imported and duplicate counts
 - SQLite transaction storage
-- Rule-based starter categorization
+- Explainable starter categorization with confidence, source, and matched merchant signals
 - Editable transaction categories
 - Category review queue with confidence-scored suggestions
 - Saved merchant rules that apply to future imports
@@ -33,7 +33,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Cash-flow forecasts from imported activity and upcoming recurring charges
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection
-- Deterministic question answering for spending, income, account, category, merchant, budget, budget recommendation, forecast, recurring charge, monthly report, largest expense, and anomaly questions
+- Deterministic question answering for spending, income, account, category, category explanation, merchant, budget, budget recommendation, forecast, recurring charge, monthly report, largest expense, and anomaly questions
 - RAG-style broad Q&A with cited transaction and summary evidence
 - Local Q&A history for recent finance questions and answers
 - React dashboard scaffold
@@ -41,8 +41,8 @@ The first implementation slice focuses on trustworthy analytics:
 - Browser UI smoke test for import, manual transactions, backup/restore, and Q&A
 - GitHub Actions backend test, frontend build, and UI smoke workflows
 
-Future AI layers can improve categorization, explain trends, and add RAG over statement
-notes and transaction context.
+Future LLM layers can improve ambiguous categorization, explain trends, and add
+RAG over statement notes and transaction context.
 
 ## Project Structure
 
@@ -217,8 +217,11 @@ Clear follow-up questions such as `What about housing?` reuse the previous Q&A
 month when no new month is provided.
 
 The category review queue surfaces uncertain imported categories and suggests a
-more likely category when the rule hints have enough signal. Applying a suggestion
-can also save a merchant rule for future imports.
+more likely category when the local classifier has enough signal. Preview rows
+and review items include confidence, source, matched merchant signals, and a short
+reason. Ask `Why was Trader Joes categorized as Food & Grocery in July 2026?` to
+get the same explanation through Q&A. Applying a suggestion can also save a
+merchant rule for future imports.
 
 ## Notes
 

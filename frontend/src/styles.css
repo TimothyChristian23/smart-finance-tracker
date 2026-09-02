@@ -529,9 +529,10 @@ h2 {
 
 .preview-row {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  min-height: 54px;
+  min-height: 62px;
   border: 1px solid var(--line);
   padding: 9px;
 }
@@ -540,8 +541,13 @@ h2 {
   border-left: 4px solid var(--warn);
 }
 
+.preview-row > div {
+  min-width: 0;
+}
+
 .preview-row strong,
-.preview-row span {
+.preview-row span,
+.preview-row small {
   display: block;
 }
 
@@ -554,6 +560,14 @@ h2 {
   margin-top: 3px;
   color: var(--muted);
   font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.preview-row small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
   line-height: 1.35;
 }
 

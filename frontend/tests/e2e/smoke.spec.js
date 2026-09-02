@@ -56,7 +56,7 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   const askPanel = page.getByTestId("ask-panel");
   await askPanel.locator("textarea").fill("How much did I spend on Cash in July 2026?");
   await askPanel.getByRole("button", { name: "Ask" }).click();
-  await expect(askPanel.getByText("Spending for Cash in 2026-07 was $42.00.")).toBeVisible();
+  await expect(page.getByTestId("answer-card")).toContainText("Spending for Cash in 2026-07 was $42.00.");
 
   const downloadPromise = page.waitForEvent("download");
   await importPanel.getByRole("button", { name: "Backup" }).click();

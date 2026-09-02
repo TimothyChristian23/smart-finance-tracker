@@ -20,6 +20,7 @@ from app.database import (
     available_months,
     budget_progress,
     budget_recommendations,
+    category_explanations_for_question,
     category_review_queue,
     category_totals,
     cents_to_dollars,
@@ -79,6 +80,13 @@ class ImportPreviewRow(BaseModel):
     description: str
     amount: float
     category: str
+    suggested_category: str | None = None
+    category_confidence: float | None = None
+    category_confidence_label: str | None = None
+    category_source: str | None = None
+    category_source_label: str | None = None
+    category_reason: str | None = None
+    matched_terms: list[str] = Field(default_factory=list)
     source_file: str | None = None
     account_name: str | None = None
     duplicate: bool
@@ -155,6 +163,10 @@ class CategoryReviewResponse(BaseModel):
     current_category: str
     suggested_category: str
     confidence: float
+    confidence_label: str
+    category_source: str
+    category_source_label: str
+    matched_terms: list[str] = Field(default_factory=list)
     reason: str
     action: str
 
@@ -750,6 +762,9 @@ def answer_finance_question(question: str) -> AskResponse:
 
     if account_name and looks_like_account_summary_question(normalized):
         return answer_account_question(normalized, month, account_name)
+
+    if looks_like_category_explanation_question(normalized):
+        return answer_category_explanation_question(question, month)
 
     if looks_like_monthly_report_question(normalized):
         report_month = month or latest_imported_month()
@@ -1500,6 +1515,41 @@ def latest_imported_month() -> str | None:
     return months[0]["month"] if months else None
 
 
+def answer_category_explanation_question(question: str, month: str | None) -> AskResponse:
+    explanations = category_explanations_for_question(question, month=month, limit=5)
+    explanation_month = month or latest_imported_month()
+    if not explanations:
+        return AskResponse(
+            answer=f"I could not find a matching transaction for {format_month_label(explanation_month)}.",
+            month=explanation_month,
+            intent="category_explanation",
+        )
+
+    lead = explanations[0]
+    transaction = lead["transaction"]
+    confidence_percent = round(lead["confidence"] * 100)
+    source = lead["category_source_label"].lower()
+    if lead["current_category"] == lead["suggested_category"]:
+        category_text = f"{transaction['description']} is currently {lead['current_category']}."
+    else:
+        category_text = (
+            f"{transaction['description']} is currently {lead['current_category']}, "
+            f"but I would suggest {lead['suggested_category']}."
+        )
+
+    return AskResponse(
+        answer=(
+            f"{category_text} I have {confidence_percent}% confidence from {source}: "
+            f"{lead['reason']}"
+        ),
+        amount=abs(transaction["amount"]),
+        categories=[lead["suggested_category"]],
+        month=transaction["date"][:7],
+        intent="category_explanation",
+        data=explanations,
+    )
+
+
 def answer_account_question(question: str, month: str | None, account_name: str) -> AskResponse:
     summaries = account_summary(month=month)
     account = next(
@@ -1621,6 +1671,15 @@ def looks_like_contextual_question(question: str) -> bool:
         has_any(question, ["why", "explain", "pattern", "patterns", "stand out", "stood out", "tell me about"])
         or has_any(question, ["evidence", "cite", "cited", "supporting", "related"])
     )
+
+
+def looks_like_category_explanation_question(question: str) -> bool:
+    if looks_like_top_category_question(question):
+        return False
+    asks_for_reason = has_any(question, ["why", "explain", "reason", "confidence", "suggested", "assigned"])
+    asks_for_category = has_any(question, ["categor", "classif"])
+    asks_which_category = has_any(question, ["what category", "which category"])
+    return (asks_for_category and asks_for_reason) or asks_which_category
 
 
 def looks_like_account_summary_question(question: str) -> bool:

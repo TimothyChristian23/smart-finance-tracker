@@ -101,6 +101,51 @@ def test_preview_transactions_does_not_import_and_marks_duplicates():
     assert all(row["duplicate"] for row in duplicate_preview["rows"])
 
 
+def test_preview_includes_category_explanations_and_saved_rules():
+    response = client.post(
+        "/transactions/preview",
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    )
+
+    assert response.status_code == 200
+    trader_joes = next(
+        row for row in response.json()["rows"]
+        if row["description"] == "Trader Joes"
+    )
+    assert trader_joes["category"] == "Food & Grocery"
+    assert trader_joes["suggested_category"] == "Food & Grocery"
+    assert trader_joes["category_confidence"] == 0.92
+    assert trader_joes["category_confidence_label"] == "high"
+    assert trader_joes["category_source"] == "keyword_rule"
+    assert trader_joes["category_source_label"] == "Merchant keyword"
+    assert trader_joes["matched_terms"] == ["trader joe"]
+    assert "trader joe" in trader_joes["category_reason"]
+
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Trader Joes"
+    )
+    client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": True},
+    )
+
+    saved_rule_preview = client.post(
+        "/transactions/preview",
+        files={"file": ("next.csv", SAMPLE_CSV, "text/csv")},
+    ).json()
+    saved_rule_row = next(
+        row for row in saved_rule_preview["rows"]
+        if row["description"] == "Trader Joes"
+    )
+    assert saved_rule_row["category"] == "Dining"
+    assert saved_rule_row["suggested_category"] == "Dining"
+    assert saved_rule_row["category_confidence"] == 0.99
+    assert saved_rule_row["category_source"] == "saved_rule"
+    assert "Saved merchant rule" in saved_rule_row["category_reason"]
+
+
 def test_preview_reports_csv_row_errors_without_importing():
     csv_content = """Date,Description,Amount
 2026-07-01,Payroll Deposit,3200.00
@@ -734,9 +779,13 @@ def test_category_review_queue_suggests_uncertain_updates():
     assert set(by_description) == {"Gym Membership", "Random Shop"}
     assert by_description["Gym Membership"]["current_category"] == "Other"
     assert by_description["Gym Membership"]["suggested_category"] == "Health"
-    assert by_description["Gym Membership"]["confidence"] == 0.74
+    assert by_description["Gym Membership"]["confidence"] == 0.77
+    assert by_description["Gym Membership"]["confidence_label"] == "medium"
+    assert by_description["Gym Membership"]["category_source"] == "category_signals"
+    assert by_description["Gym Membership"]["matched_terms"] == ["gym"]
     assert by_description["Gym Membership"]["action"] == "update"
     assert by_description["Random Shop"]["suggested_category"] == "Shopping"
+    assert by_description["Random Shop"]["category_source_label"] == "Category signals"
 
     gym_id = by_description["Gym Membership"]["transaction"]["id"]
     update_response = client.patch(
@@ -1136,6 +1185,27 @@ def test_ask_returns_cited_evidence_for_broad_questions():
     assert "I found 1 relevant transaction" in payload["answer"]
     assert any(citation["type"] == "summary" for citation in payload["citations"])
     assert any(citation["title"] == "Amazon Marketplace" for citation in payload["citations"])
+
+
+def test_ask_explains_transaction_category_assignment():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.post(
+        "/ask",
+        json={"question": "Why was Trader Joes categorized as Food & Grocery in July 2026?"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "category_explanation"
+    assert payload["amount"] == 86.42
+    assert payload["categories"] == ["Food & Grocery"]
+    assert payload["month"] == "2026-07"
+    assert "Trader Joes is currently Food & Grocery." in payload["answer"]
+    assert "92% confidence" in payload["answer"]
+    assert "trader joe" in payload["answer"]
+    assert payload["data"][0]["transaction"]["description"] == "Trader Joes"
+    assert payload["data"][0]["category_source"] == "keyword_rule"
 
 
 def test_ask_explains_contextual_category_questions_with_evidence():
