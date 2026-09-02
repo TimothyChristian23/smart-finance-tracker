@@ -13,7 +13,7 @@ AI-ready product surface.
 6. Users can correct transaction categories, review confidence-scored category suggestions, save exact merchant rules for future imports, set monthly category budgets, and apply suggested budgets.
 7. Dashboard endpoints return searchable transactions, upload history, monthly category review suggestions, monthly category summaries, monthly insight reports, cash-flow forecasts, budget recommendations, budgets, recurring charges, merchants, trends, largest expenses, anomalies, and saved rules.
 8. The question endpoint routes common finance questions to exact SQL-backed totals, rankings, monthly reports, forecast projections, and suggested budgets. Broader questions fall through to a retrieval layer that returns cited transaction and aggregate evidence.
-9. The React frontend previews and uploads statements, then displays import history, summaries, monthly insights, cash-flow forecasts, budget recommendations, category review suggestions, budget progress, recurring charges, anomalies, editable categories, saved rules, filtered transactions, CSV export, and a finance Q&A panel with citations.
+9. The React frontend previews and uploads statements, then displays import history, summaries, monthly insights, cash-flow forecasts, budget recommendations, category review suggestions, budget progress, recurring charges, anomalies, editable categories, saved rules, filtered transactions, CSV export, full JSON backup export, and a finance Q&A panel with citations.
 
 ## Trust Boundary
 
@@ -21,6 +21,10 @@ Exact totals should come from database queries, not from an LLM. The retrieval l
 can provide cited evidence for broad answers, while future AI features can classify
 ambiguous merchants, explain spending patterns, and route questions. Arithmetic
 should stay deterministic.
+
+Users can export a full local JSON backup that includes transactions, upload
+history, budgets, merchant rules, monthly summaries, and counts. Destructive data
+management should stay explicit and clearly scoped.
 
 ## Future AI Layer
 

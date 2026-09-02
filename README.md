@@ -19,6 +19,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Budget recommendations from recent history and recurring charges
 - Recurring charge and subscription detection
 - Transaction search, category filtering, and CSV export
+- Full local JSON backup export for transactions, uploads, budgets, and merchant rules
 - Monthly spending summaries
 - Monthly insight reports with highlights, risks, and next actions
 - Cash-flow forecasts from imported activity and upcoming recurring charges
@@ -121,6 +122,7 @@ GET  /uploads
 POST /transactions/preview
 GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
+GET  /data/export
 GET  /categories?month=2026-07
 GET  /categories/review?month=2026-07
 GET  /category-options
@@ -150,6 +152,9 @@ Statements that are scanned images will need OCR support before they can be impo
 Use import preview from the dashboard or `POST /transactions/preview` to inspect
 normalized rows, category assignments, totals, and duplicate estimates before
 saving statement data.
+
+Use `GET /data/export` or the dashboard Backup button to download a JSON snapshot
+of local finance data before clearing or moving development databases.
 
 Recurring charge detection needs the same merchant to appear across multiple months,
 so it becomes useful after importing a few statements. Upload

@@ -324,7 +324,7 @@ h2 {
 
 .button-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 10px;
 }
 
@@ -333,6 +333,11 @@ h2 {
   background: #fff !important;
   color: var(--ink) !important;
   padding: 0 12px;
+}
+
+.danger-button {
+  border-color: rgba(180, 35, 24, 0.35);
+  color: var(--bad) !important;
 }
 
 .helper-text,

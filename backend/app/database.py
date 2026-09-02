@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -574,6 +574,51 @@ def list_transactions(
             [*params, limit],
         ).fetchall()
     return [_transaction_row_to_dict(row) for row in rows]
+
+
+def export_backup() -> dict:
+    """Return a complete JSON-serializable snapshot of local finance data."""
+    transactions = list_transactions(limit=100000)
+    uploads = list_uploads(limit=100000)
+    merchant_rules = list_merchant_rules()
+    budgets = list_all_budgets()
+    months = available_months()
+    summary = monthly_summary(month=None)
+
+    return {
+        "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "counts": {
+            "transactions": len(transactions),
+            "uploads": len(uploads),
+            "merchant_rules": len(merchant_rules),
+            "budgets": len(budgets),
+            "months": len(months),
+        },
+        "summary": summary,
+        "months": months,
+        "transactions": transactions,
+        "budgets": budgets,
+        "merchant_rules": merchant_rules,
+        "uploads": uploads,
+    }
+
+
+def list_all_budgets() -> list[dict]:
+    """Return every stored budget with live spending progress."""
+    with connect() as conn:
+        months = conn.execute(
+            """
+            SELECT DISTINCT month
+            FROM budgets
+            ORDER BY month DESC
+            """
+        ).fetchall()
+
+    budgets = []
+    for row in months:
+        budgets.extend(budget_progress(row["month"]))
+    return budgets
 
 
 def category_review_queue(month: str | None = None, limit: int = 20) -> list[dict]:

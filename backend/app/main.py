@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -24,6 +25,7 @@ from app.database import (
     delete_budget,
     delete_merchant_rule,
     detect_anomalies,
+    export_backup,
     insert_transactions,
     largest_expenses,
     list_merchant_rules,
@@ -344,6 +346,17 @@ async def export_transactions(
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/data/export")
+async def export_data() -> Response:
+    backup = export_backup()
+    filename = f"finance-backup-{date.today().isoformat()}.json"
+    return Response(
+        content=json.dumps(backup, indent=2),
+        media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

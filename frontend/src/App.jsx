@@ -375,6 +375,10 @@ export default function App() {
     window.location.assign(`${API_BASE}/transactions/export${params}`);
   }
 
+  function handleExportBackup() {
+    window.location.assign(`${API_BASE}/data/export`);
+  }
+
   const visibleTransactions = useMemo(() => transactions.slice(0, 20), [transactions]);
   const trendDomain = useMemo(() => [0, "auto"], []);
 
@@ -495,9 +499,13 @@ export default function App() {
                 Preview
               </button>
               <button type="submit" disabled={busy}>Import</button>
-              <button className="ghost-button" type="button" disabled={busy || !transactions.length} onClick={handleClear}>
+              <button className="ghost-button" type="button" disabled={busy} onClick={handleExportBackup}>
+                <Download size={16} />
+                Backup
+              </button>
+              <button className="ghost-button danger-button" type="button" disabled={busy || !transactions.length} onClick={handleClear}>
                 <Trash2 size={16} />
-                Clear
+                Clear Txns
               </button>
             </div>
           </form>

@@ -185,6 +185,46 @@ def test_transaction_export_matches_filters():
     assert "Chipotle" not in response.text
 
 
+def test_data_export_backup_includes_local_finance_records():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Trader Joes"
+    )
+    client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": True},
+    )
+    client.put(
+        "/budgets",
+        json={"month": "2026-07", "category": "Dining", "amount": 200},
+    )
+
+    response = client.get("/data/export")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert "finance-backup-" in response.headers["content-disposition"]
+    payload = response.json()
+    assert payload["schema_version"] == 1
+    assert payload["counts"] == {
+        "transactions": 11,
+        "uploads": 1,
+        "merchant_rules": 1,
+        "budgets": 1,
+        "months": 1,
+    }
+    assert payload["summary"]["total_spending"] == 2840.87
+    assert payload["months"][0]["month"] == "2026-07"
+    assert payload["uploads"][0]["filename"] == "sample.csv"
+    assert payload["merchant_rules"][0]["merchant"] == "Trader Joes"
+    assert payload["budgets"][0]["category"] == "Dining"
+    assert any(
+        item["description"] == "Trader Joes" and item["category"] == "Dining"
+        for item in payload["transactions"]
+    )
+
+
 def test_update_transaction_category_recalculates_summary():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = next(
