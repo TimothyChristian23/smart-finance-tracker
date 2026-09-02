@@ -7,7 +7,7 @@ AI-ready product surface.
 
 1. A user uploads or previews a CSV bank statement or text-based PDF statement.
 2. The backend parses common CSV columns, common bank-specific CSV aliases, debit/credit split columns, and transaction-like rows from PDF text.
-3. Preview requests return normalized rows, category assignments, totals, date ranges, and duplicate estimates without saving data.
+3. Preview requests return normalized rows, category assignments, totals, date ranges, duplicate estimates, and row-level CSV errors without saving data.
 4. Import requests normalize transactions into SQLite with cent-based amounts, and each successful upload is logged with imported and duplicate counts.
 5. Starter categorization rules assign categories from merchant descriptions.
 6. Users can correct transaction categories, review confidence-scored category suggestions, save exact merchant rules for future imports, set monthly category budgets, and apply suggested budgets.

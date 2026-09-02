@@ -156,7 +156,9 @@ Statements that are scanned images will need OCR support before they can be impo
 
 Use import preview from the dashboard or `POST /transactions/preview` to inspect
 normalized rows, category assignments, totals, and duplicate estimates before
-saving statement data.
+saving statement data. CSV preview keeps valid rows visible and reports row-level
+errors for lines that need cleanup; importing remains strict and rejects files
+with invalid rows.
 CSV imports accept common bank-style headers such as `Date`, `Posting Date`,
 `Transaction Date`, `Description`, `Transaction Description`, `Payee`, `Memo`,
 `Amount`, `Transaction Amount`, `Debit Amount`, and `Credit Amount`. Debit values

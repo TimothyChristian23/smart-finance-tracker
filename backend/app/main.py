@@ -365,8 +365,9 @@ async def upload_transactions(file: UploadFile = File(...)) -> UploadResponse:
 @app.post("/transactions/preview", response_model=ImportPreviewResponse)
 async def preview_transactions(file: UploadFile = File(...), limit: int = 25) -> dict:
     """Preview parsed statement rows and duplicate estimates without importing."""
-    filename, file_type, rows = await parse_uploaded_statement(file)
+    filename, file_type, rows, errors = await preview_uploaded_statement(file)
     preview = preview_import(rows, sample_limit=bounded_limit(limit, maximum=100))
+    preview["errors"] = errors
     return {
         "filename": filename,
         "file_type": file_type,
@@ -922,13 +923,43 @@ async def parse_uploaded_statement(file: UploadFile) -> tuple[str, str, list[dic
     raise HTTPException(status_code=400, detail="Only CSV or text-based PDF uploads are supported.")
 
 
+async def preview_uploaded_statement(file: UploadFile) -> tuple[str, str, list[dict], list[str]]:
+    filename = Path(file.filename or "transactions.csv").name
+    suffix = Path(filename).suffix.lower()
+    content = await file.read()
+    if suffix == ".csv":
+        try:
+            rows, errors = parse_transactions_csv_preview(content.decode("utf-8-sig"), filename)
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail="CSV file must be UTF-8 text.") from exc
+        return filename, "csv", rows, errors
+    if suffix == ".pdf":
+        return filename, "pdf", parse_transactions_pdf(content, filename), []
+    raise HTTPException(status_code=400, detail="Only CSV or text-based PDF uploads are supported.")
+
+
 def parse_transactions_csv(content: str, source_file: str) -> list[dict]:
     """Parse common CSV statement columns into normalized transaction rows."""
+    rows, _errors = parse_transactions_csv_rows(content, source_file, collect_errors=False)
+    return rows
+
+
+def parse_transactions_csv_preview(content: str, source_file: str) -> tuple[list[dict], list[str]]:
+    """Parse CSV rows for preview and collect row-level errors."""
+    return parse_transactions_csv_rows(content, source_file, collect_errors=True)
+
+
+def parse_transactions_csv_rows(content: str, source_file: str, collect_errors: bool = False) -> tuple[list[dict], list[str]]:
+    """Parse CSV statement rows with optional row-level error collection."""
     reader = csv.DictReader(StringIO(content))
     if not reader.fieldnames:
-        raise HTTPException(status_code=400, detail="CSV file is missing headers.")
+        message = "CSV file is missing headers."
+        if collect_errors:
+            return [], [message]
+        raise HTTPException(status_code=400, detail=message)
 
     rows = []
+    errors = []
     for row_number, raw_row in enumerate(reader, start=2):
         if row_is_blank(raw_row):
             continue
@@ -937,7 +968,11 @@ def parse_transactions_csv(content: str, source_file: str) -> list[dict]:
             description = get_column(raw_row, DESCRIPTION_COLUMNS)
             amount_cents = parse_amount(raw_row)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Row {row_number}: {exc}") from exc
+            message = f"Row {row_number}: {exc}"
+            if collect_errors:
+                errors.append(message)
+                continue
+            raise HTTPException(status_code=400, detail=message) from exc
 
         category = get_column(raw_row, CATEGORY_COLUMNS, required=False)
         rows.append({
@@ -949,9 +984,12 @@ def parse_transactions_csv(content: str, source_file: str) -> list[dict]:
         })
 
     if not rows:
-        raise HTTPException(status_code=400, detail="CSV file does not contain any transactions.")
+        message = "CSV file does not contain any transactions."
+        if collect_errors:
+            return [], errors or [message]
+        raise HTTPException(status_code=400, detail=message)
 
-    return rows
+    return rows, errors
 
 
 def row_is_blank(raw_row: dict) -> bool:

@@ -99,6 +99,41 @@ def test_preview_transactions_does_not_import_and_marks_duplicates():
     assert all(row["duplicate"] for row in duplicate_preview["rows"])
 
 
+def test_preview_reports_csv_row_errors_without_importing():
+    csv_content = """Date,Description,Amount
+2026-07-01,Payroll Deposit,3200.00
+bad-date,Trader Joes,-86.42
+2026-07-03,Apartment Rent,-1450.00
+2026-07-04,Missing Amount,
+"""
+
+    response = client.post(
+        "/transactions/preview",
+        files={"file": ("mixed.csv", csv_content, "text/csv")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["row_count"] == 2
+    assert payload["importable_count"] == 2
+    assert payload["duplicate_count"] == 0
+    assert payload["total_income"] == 3200.0
+    assert payload["total_spending"] == 1450.0
+    assert [row["description"] for row in payload["rows"]] == ["Payroll Deposit", "Apartment Rent"]
+    assert payload["errors"][0] == "Row 3: invalid date 'bad-date'"
+    assert payload["errors"][1].startswith("Row 5: missing required column")
+
+    empty_summary = client.get("/summary?month=2026-07").json()
+    assert empty_summary["transaction_count"] == 0
+
+    upload_response = client.post(
+        "/transactions/upload",
+        files={"file": ("mixed.csv", csv_content, "text/csv")},
+    )
+    assert upload_response.status_code == 400
+    assert upload_response.json()["detail"] == "Row 3: invalid date 'bad-date'"
+
+
 def test_duplicate_upload_skips_existing_transactions():
     first = client.post(
         "/transactions/upload",

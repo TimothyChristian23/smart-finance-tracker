@@ -899,6 +899,8 @@ function UploadHistoryList({ uploads }) {
 }
 
 function ImportPreview({ preview }) {
+  const errors = preview.errors || [];
+
   return (
     <div className="import-preview">
       <div className="preview-metrics">
@@ -906,6 +908,16 @@ function ImportPreview({ preview }) {
         <span>{preview.duplicate_count} duplicates</span>
         <span>{money(preview.total_spending)} spending</span>
       </div>
+      {!!errors.length && (
+        <div className="preview-errors">
+          {errors.slice(0, 4).map((error) => (
+            <span key={error}>
+              <AlertTriangle size={14} />
+              {error}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="preview-rows">
         {preview.rows.slice(0, 5).map((row, index) => (
           <div className={`preview-row ${row.duplicate ? "preview-duplicate" : ""}`} key={`${row.date}-${row.description}-${index}`}>
