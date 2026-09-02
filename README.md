@@ -26,6 +26,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Recurring charge and subscription detection
 - Transaction search, category filtering, and CSV export
 - Full local JSON backup export for transactions, uploads, budgets, and merchant rules
+- Guarded JSON backup restore for moving or recovering local development data
 - Guarded local data reset with typed confirmation
 - Monthly spending summaries
 - Monthly insight reports with highlights, risks, and next actions
@@ -133,6 +134,7 @@ POST /transactions/preview
 GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
 GET  /data/export
+POST /data/import
 GET  /accounts
 GET  /accounts/summary?month=2026-07
 GET  /ask/history
@@ -186,6 +188,8 @@ Manual transactions can be added from the Transactions panel and are stored with
 
 Use `GET /data/export` or the dashboard Backup button to download a JSON snapshot
 of local finance data before clearing or moving development databases.
+Use the Privacy panel Restore control or `POST /data/import` with a backup JSON
+file and `confirmation=RESTORE` to replace local data from a backup.
 The dashboard Privacy panel can reset all local app records after typing `RESET`;
 the API requires the same confirmation with `DELETE /data?confirmation=RESET`.
 

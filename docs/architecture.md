@@ -13,7 +13,7 @@ AI-ready product surface.
 6. Users can add manual transactions, correct transaction categories, edit or delete transaction details, review confidence-scored category suggestions, save exact merchant rules for future imports, set monthly category budgets, and apply suggested budgets.
 7. Dashboard endpoints return searchable transactions, upload history, account summaries, monthly category review suggestions, monthly category summaries, monthly insight reports, cash-flow forecasts, budget recommendations, budgets, recurring charges, merchants, trends, largest expenses, anomalies, and saved rules.
 8. The question endpoint routes common finance questions to exact SQL-backed totals, account summaries, rankings, monthly reports, forecast projections, and suggested budgets. Broader questions fall through to a retrieval layer that returns cited transaction and aggregate evidence. Each answered question is saved to local Q&A history, and clear follow-up wording can reuse the previous answer's month.
-9. The React frontend previews and uploads statements, supports manual transaction entry and transaction deletion, then displays import history, account labels, account summaries, monthly insights, cash-flow forecasts, budget recommendations, category review suggestions, budget progress, recurring charges, anomalies, editable transaction details, saved rules, filtered transactions, CSV export, full JSON backup export, and a finance Q&A panel with citations and recent question history.
+9. The React frontend previews and uploads statements, supports manual transaction entry and transaction deletion, then displays import history, account labels, account summaries, monthly insights, cash-flow forecasts, budget recommendations, category review suggestions, budget progress, recurring charges, anomalies, editable transaction details, saved rules, filtered transactions, CSV export, full JSON backup export, guarded JSON backup restore, and a finance Q&A panel with citations and recent question history.
 
 ## Trust Boundary
 
@@ -24,6 +24,8 @@ should stay deterministic.
 
 Users can export a full local JSON backup that includes transactions, upload
 history, budgets, merchant rules, Q&A history, monthly summaries, and counts.
+JSON restore validates the backup first, requires typed `RESTORE` confirmation,
+then replaces local durable records and lets summaries recompute from SQLite.
 Full local reset requires a typed `RESET` confirmation in both the dashboard and
 API, then clears transactions, uploads, budgets, merchant rules, and Q&A history.
 

@@ -45,6 +45,7 @@ from app.database import (
     preview_import,
     record_upload,
     record_ask_history,
+    restore_backup,
     recurring_charges,
     reset_all_data,
     reset_db,
@@ -124,6 +125,19 @@ class AccountSummaryResponse(BaseModel):
     total_income: float
     net: float
     transaction_count: int
+
+
+class DataRestoreCounts(BaseModel):
+    transactions: int
+    uploads: int
+    merchant_rules: int
+    budgets: int
+    ask_history: int
+
+
+class DataRestoreResponse(BaseModel):
+    message: str
+    counts: DataRestoreCounts
 
 
 class TransactionResponse(BaseModel):
@@ -493,6 +507,27 @@ async def export_data() -> Response:
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.post("/data/import", response_model=DataRestoreResponse)
+async def import_data(file: UploadFile = File(...), confirmation: str | None = Form(None)) -> dict:
+    if confirmation != "RESTORE":
+        raise HTTPException(status_code=400, detail="Type RESTORE to replace local finance data from a backup.")
+
+    content = await file.read()
+    try:
+        backup = json.loads(content.decode("utf-8-sig"))
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Backup file must be UTF-8 JSON.") from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Backup file must contain valid JSON.") from exc
+
+    try:
+        counts = restore_backup(backup)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"message": "Backup restored.", "counts": counts}
 
 
 @app.get("/accounts", response_model=list[str])

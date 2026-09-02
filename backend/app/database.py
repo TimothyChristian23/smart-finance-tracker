@@ -846,6 +846,111 @@ def export_backup() -> dict:
     }
 
 
+def restore_backup(backup: dict) -> dict:
+    """Replace local records with durable data from an exported backup."""
+    if not isinstance(backup, dict):
+        raise ValueError("Backup must be a JSON object.")
+    if backup.get("schema_version") != 1:
+        raise ValueError("Unsupported backup schema version.")
+
+    transactions = _restore_transactions(backup)
+    uploads = _restore_uploads(backup)
+    merchant_rules = _restore_merchant_rules(backup)
+    budgets = _restore_budgets(backup)
+    ask_history = _restore_ask_history(backup)
+    if len({row[0] for row in merchant_rules}) != len(merchant_rules):
+        raise ValueError("Backup contains duplicate merchant rules.")
+    if len({(row[0], row[1]) for row in budgets}) != len(budgets):
+        raise ValueError("Backup contains duplicate budgets.")
+
+    with connect() as conn:
+        conn.execute("DELETE FROM transactions")
+        conn.execute("DELETE FROM upload_history")
+        conn.execute("DELETE FROM merchant_rules")
+        conn.execute("DELETE FROM budgets")
+        conn.execute("DELETE FROM ask_history")
+        conn.executemany(
+            """
+            INSERT INTO transactions (
+                transaction_date,
+                description,
+                amount_cents,
+                category,
+                source_file,
+                account_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            transactions,
+        )
+        conn.executemany(
+            """
+            INSERT INTO upload_history (
+                filename,
+                file_type,
+                account_name,
+                parsed_count,
+                imported_count,
+                duplicates_skipped,
+                first_transaction_date,
+                last_transaction_date,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            uploads,
+        )
+        conn.executemany(
+            """
+            INSERT INTO merchant_rules (
+                merchant_key,
+                merchant_name,
+                category,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            merchant_rules,
+        )
+        conn.executemany(
+            """
+            INSERT INTO budgets (
+                month,
+                category,
+                amount_cents,
+                updated_at
+            )
+            VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            budgets,
+        )
+        conn.executemany(
+            """
+            INSERT INTO ask_history (
+                question,
+                answer,
+                amount,
+                categories_json,
+                month,
+                intent,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            ask_history,
+        )
+        conn.commit()
+
+    return {
+        "transactions": len(transactions),
+        "uploads": len(uploads),
+        "merchant_rules": len(merchant_rules),
+        "budgets": len(budgets),
+        "ask_history": len(ask_history),
+    }
+
+
 def list_all_budgets() -> list[dict]:
     """Return every stored budget with live spending progress."""
     with connect() as conn:
@@ -1623,6 +1728,201 @@ def _upload_row_to_dict(row: sqlite3.Row) -> dict:
         "last_transaction_date": row["last_transaction_date"],
         "created_at": row["created_at"],
     }
+
+
+def _restore_transactions(backup: dict) -> list[tuple]:
+    rows = []
+    for index, item in enumerate(_backup_list(backup, "transactions"), start=1):
+        record = _backup_object(item, f"transactions[{index}]")
+        rows.append((
+            _backup_date(record, "date", f"transactions[{index}]"),
+            _backup_required_text(record, "description", f"transactions[{index}]", max_length=200),
+            _backup_amount_cents(record, "amount", f"transactions[{index}]"),
+            _backup_required_text(record, "category", f"transactions[{index}]", max_length=80),
+            _backup_optional_text(record, "source_file", max_length=200),
+            _backup_optional_text(record, "account_name", max_length=80),
+        ))
+    return rows
+
+
+def _restore_uploads(backup: dict) -> list[tuple]:
+    rows = []
+    for index, item in enumerate(_backup_list(backup, "uploads"), start=1):
+        record = _backup_object(item, f"uploads[{index}]")
+        rows.append((
+            _backup_required_text(record, "filename", f"uploads[{index}]", max_length=260),
+            _backup_required_text(record, "file_type", f"uploads[{index}]", max_length=20),
+            _backup_optional_text(record, "account_name", max_length=80),
+            _backup_non_negative_int(record, "parsed_count", f"uploads[{index}]"),
+            _backup_non_negative_int(record, "imported_count", f"uploads[{index}]"),
+            _backup_non_negative_int(record, "duplicates_skipped", f"uploads[{index}]"),
+            _backup_optional_date(record, "first_transaction_date", f"uploads[{index}]"),
+            _backup_optional_date(record, "last_transaction_date", f"uploads[{index}]"),
+            _backup_optional_text(record, "created_at", max_length=80),
+        ))
+    return rows
+
+
+def _restore_merchant_rules(backup: dict) -> list[tuple]:
+    rows = []
+    for index, item in enumerate(_backup_list(backup, "merchant_rules"), start=1):
+        record = _backup_object(item, f"merchant_rules[{index}]")
+        merchant_name = _backup_required_text(record, "merchant", f"merchant_rules[{index}]", max_length=200)
+        merchant_key = _backup_optional_text(record, "merchant_key", max_length=200) or normalize_text(merchant_name)
+        updated_at = _backup_optional_text(record, "updated_at", max_length=80)
+        rows.append((
+            merchant_key,
+            merchant_name,
+            _backup_required_text(record, "category", f"merchant_rules[{index}]", max_length=80),
+            updated_at,
+            updated_at,
+        ))
+    return rows
+
+
+def _restore_budgets(backup: dict) -> list[tuple]:
+    rows = []
+    for index, item in enumerate(_backup_list(backup, "budgets"), start=1):
+        record = _backup_object(item, f"budgets[{index}]")
+        rows.append((
+            _backup_month(record, "month", f"budgets[{index}]"),
+            _backup_required_text(record, "category", f"budgets[{index}]", max_length=80),
+            _backup_positive_amount_cents(record, "amount", f"budgets[{index}]"),
+            _backup_optional_text(record, "updated_at", max_length=80),
+        ))
+    return rows
+
+
+def _restore_ask_history(backup: dict) -> list[tuple]:
+    rows = []
+    for index, item in enumerate(_backup_list(backup, "ask_history"), start=1):
+        record = _backup_object(item, f"ask_history[{index}]")
+        categories = record.get("categories", [])
+        if not isinstance(categories, list) or not all(isinstance(category, str) for category in categories):
+            raise ValueError(f"ask_history[{index}].categories must be a list of strings.")
+        rows.append((
+            _backup_required_text(record, "question", f"ask_history[{index}]", max_length=500),
+            _backup_required_text(record, "answer", f"ask_history[{index}]", max_length=2000),
+            _backup_optional_amount(record, "amount", f"ask_history[{index}]"),
+            json.dumps(categories),
+            _backup_optional_month(record, "month", f"ask_history[{index}]"),
+            _backup_required_text(record, "intent", f"ask_history[{index}]", max_length=80),
+            _backup_optional_text(record, "created_at", max_length=80),
+        ))
+    return rows
+
+
+def _backup_list(backup: dict, key: str) -> list:
+    value = backup.get(key, [])
+    if not isinstance(value, list):
+        raise ValueError(f"Backup field '{key}' must be a list.")
+    return value
+
+
+def _backup_object(value: object, label: str) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object.")
+    return value
+
+
+def _backup_required_text(record: dict, key: str, label: str, max_length: int) -> str:
+    value = record.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"{label}.{key} is required.")
+    normalized = " ".join(value.split())
+    if not normalized:
+        raise ValueError(f"{label}.{key} is required.")
+    if len(normalized) > max_length:
+        raise ValueError(f"{label}.{key} must be {max_length} characters or fewer.")
+    return normalized
+
+
+def _backup_optional_text(record: dict, key: str, max_length: int) -> str | None:
+    value = record.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be text.")
+    normalized = " ".join(value.split())
+    if not normalized:
+        return None
+    if len(normalized) > max_length:
+        raise ValueError(f"{key} must be {max_length} characters or fewer.")
+    return normalized
+
+
+def _backup_date(record: dict, key: str, label: str) -> str:
+    value = _backup_required_text(record, key, label, max_length=10)
+    _validate_iso_date(value, f"{label}.{key}")
+    return value
+
+
+def _backup_optional_date(record: dict, key: str, label: str) -> str | None:
+    value = _backup_optional_text(record, key, max_length=10)
+    if value is None:
+        return None
+    _validate_iso_date(value, f"{label}.{key}")
+    return value
+
+
+def _backup_month(record: dict, key: str, label: str) -> str:
+    value = _backup_required_text(record, key, label, max_length=7)
+    _validate_month_text(value, f"{label}.{key}")
+    return value
+
+
+def _backup_optional_month(record: dict, key: str, label: str) -> str | None:
+    value = _backup_optional_text(record, key, max_length=7)
+    if value is None:
+        return None
+    _validate_month_text(value, f"{label}.{key}")
+    return value
+
+
+def _backup_amount_cents(record: dict, key: str, label: str) -> int:
+    return _dollars_to_cents(_backup_amount(record, key, label))
+
+
+def _backup_positive_amount_cents(record: dict, key: str, label: str) -> int:
+    amount_cents = _backup_amount_cents(record, key, label)
+    if amount_cents <= 0:
+        raise ValueError(f"{label}.{key} must be greater than zero.")
+    return amount_cents
+
+
+def _backup_optional_amount(record: dict, key: str, label: str) -> float | None:
+    value = record.get(key)
+    if value is None:
+        return None
+    return _backup_amount(record, key, label)
+
+
+def _backup_amount(record: dict, key: str, label: str) -> float:
+    value = record.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label}.{key} must be a number.")
+    return float(value)
+
+
+def _backup_non_negative_int(record: dict, key: str, label: str) -> int:
+    value = record.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{label}.{key} must be a non-negative integer.")
+    return value
+
+
+def _validate_iso_date(value: str, label: str) -> None:
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{label} must use YYYY-MM-DD format.") from exc
+    if parsed.isoformat() != value:
+        raise ValueError(f"{label} must use YYYY-MM-DD format.")
+
+
+def _validate_month_text(value: str, label: str) -> None:
+    if not re.fullmatch(r"\d{4}-\d{2}", value):
+        raise ValueError(f"{label} must use YYYY-MM format.")
 
 
 def _recurring_cadence(gaps: list[int]) -> str | None:

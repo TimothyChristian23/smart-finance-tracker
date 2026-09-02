@@ -73,6 +73,7 @@ export default function App() {
   const [answer, setAnswer] = useState(null);
   const [askHistory, setAskHistory] = useState([]);
   const [resetConfirmation, setResetConfirmation] = useState("");
+  const [restoreConfirmation, setRestoreConfirmation] = useState("");
   const [creatingTransaction, setCreatingTransaction] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [editDraft, setEditDraft] = useState(emptyTransactionDraft());
@@ -297,6 +298,50 @@ export default function App() {
       setBudgetDraft({ category: "", amount: "" });
       setTransactionFilters({ account: "", category: "", search: "" });
       setResetConfirmation("");
+      setRestoreConfirmation("");
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRestoreBackup(event) {
+    event.preventDefault();
+    const file = event.currentTarget.elements.backup.files[0];
+    if (restoreConfirmation !== "RESTORE") {
+      setUploadStatus("Type RESTORE first.");
+      return;
+    }
+    if (!file) {
+      setUploadStatus("Choose a backup JSON file first.");
+      return;
+    }
+    if (!window.confirm("Restore this backup? This replaces all local finance data.")) return;
+
+    setBusy(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("confirmation", restoreConfirmation);
+
+    try {
+      const payload = await request("/data/import", {
+        method: "POST",
+        body: formData,
+      });
+      setUploadStatus(`Restored ${payload.counts.transactions} transactions from backup.`);
+      setAnswer(null);
+      setMonth("");
+      setUploadPreview(null);
+      setCreatingTransaction(false);
+      setEditingTransaction(null);
+      setAskHistory([]);
+      setBudgetDraft({ category: "", amount: "" });
+      setTransactionFilters({ account: "", category: "", search: "" });
+      setResetConfirmation("");
+      setRestoreConfirmation("");
+      event.currentTarget.reset();
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -663,6 +708,20 @@ export default function App() {
             <button className="danger-action" type="submit" disabled={busy || !hasLocalData || resetConfirmation !== "RESET"}>
               <Trash2 size={16} />
               Reset Data
+            </button>
+          </form>
+          <form className="privacy-form restore-form" onSubmit={handleRestoreBackup}>
+            <input name="backup" type="file" accept=".json,application/json" />
+            <input
+              aria-label="Restore confirmation"
+              autoComplete="off"
+              onChange={(event) => setRestoreConfirmation(event.target.value)}
+              placeholder="RESTORE"
+              value={restoreConfirmation}
+            />
+            <button type="submit" disabled={busy || restoreConfirmation !== "RESTORE"}>
+              <FileUp size={16} />
+              Restore
             </button>
           </form>
         </section>

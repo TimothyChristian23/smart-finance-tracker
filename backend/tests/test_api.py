@@ -1,4 +1,6 @@
 """API tests for the Smart Personal Finance Tracker backend."""
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -492,6 +494,115 @@ def test_data_export_backup_includes_local_finance_records():
         item["description"] == "Trader Joes" and item["category"] == "Dining"
         for item in payload["transactions"]
     )
+
+
+def test_data_import_restores_backup_and_recalculates_analytics():
+    client.post(
+        "/transactions/upload",
+        data={"account_name": "Chase Checking"},
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    )
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Trader Joes"
+    )
+    client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": True},
+    )
+    client.put("/budgets", json={"month": "2026-07", "category": "Dining", "amount": 200})
+    client.post("/ask", json={"question": "How much did I spend on food in 2026-07?"})
+    backup = client.get("/data/export").json()
+
+    client.delete("/data", params={"confirmation": "RESET"})
+    assert client.get("/summary?month=2026-07").json()["transaction_count"] == 0
+
+    response = client.post(
+        "/data/import",
+        data={"confirmation": "RESTORE"},
+        files={"file": ("backup.json", json.dumps(backup), "application/json")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "Backup restored.",
+        "counts": {
+            "transactions": 11,
+            "uploads": 1,
+            "merchant_rules": 1,
+            "budgets": 1,
+            "ask_history": 1,
+        },
+    }
+
+    summary = client.get("/summary?month=2026-07").json()
+    assert summary["total_spending"] == 2840.87
+    assert summary["transaction_count"] == 11
+    assert client.get("/uploads").json()[0]["account_name"] == "Chase Checking"
+    assert client.get("/merchant-rules").json()[0]["merchant"] == "Trader Joes"
+    assert client.get("/budgets?month=2026-07").json()[0]["category"] == "Dining"
+    assert client.get("/ask/history").json()[0]["question"] == "How much did I spend on food in 2026-07?"
+    assert client.get("/accounts/summary?month=2026-07").json()[0]["account_name"] == "Chase Checking"
+
+
+def test_data_import_requires_confirmation_and_valid_backup():
+    client.post(
+        "/transactions",
+        json={
+            "date": "2026-08-14",
+            "description": "Cash Farmers Market",
+            "amount": -42.37,
+            "category": "Food & Grocery",
+            "account_name": "Cash",
+        },
+    )
+
+    rejected = client.post(
+        "/data/import",
+        files={"file": ("backup.json", "{}", "application/json")},
+    )
+    bad_json = client.post(
+        "/data/import",
+        data={"confirmation": "RESTORE"},
+        files={"file": ("backup.json", "{not json", "application/json")},
+    )
+    unsupported = client.post(
+        "/data/import",
+        data={"confirmation": "RESTORE"},
+        files={"file": ("backup.json", json.dumps({"schema_version": 99}), "application/json")},
+    )
+    malformed = client.post(
+        "/data/import",
+        data={"confirmation": "RESTORE"},
+        files={
+            "file": (
+                "backup.json",
+                json.dumps({
+                    "schema_version": 1,
+                    "transactions": [{
+                        "date": "bad-date",
+                        "description": "Cash Farmers Market",
+                        "amount": -42.37,
+                        "category": "Food & Grocery",
+                    }],
+                }),
+                "application/json",
+            )
+        },
+    )
+
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "Type RESTORE to replace local finance data from a backup."
+    assert bad_json.status_code == 400
+    assert bad_json.json()["detail"] == "Backup file must contain valid JSON."
+    assert unsupported.status_code == 400
+    assert unsupported.json()["detail"] == "Unsupported backup schema version."
+    assert malformed.status_code == 400
+    assert malformed.json()["detail"] == "transactions[1].date must use YYYY-MM-DD format."
+
+    summary = client.get("/summary?month=2026-08").json()
+    assert summary["transaction_count"] == 1
+    assert summary["total_spending"] == 42.37
 
 
 def test_clear_all_data_requires_confirmation_and_removes_local_records():

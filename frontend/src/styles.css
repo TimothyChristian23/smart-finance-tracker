@@ -287,6 +287,11 @@ h2 {
   grid-template-columns: minmax(0, 1fr) minmax(128px, auto);
 }
 
+.restore-form {
+  grid-template-columns: minmax(160px, 1fr) 112px minmax(112px, auto);
+  margin-top: 10px;
+}
+
 .budget-form {
   grid-template-columns: minmax(0, 1fr) 104px auto;
   margin-bottom: 12px;
