@@ -910,7 +910,7 @@ h2 {
 
 .transaction-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 190px 40px auto;
+  grid-template-columns: minmax(220px, 1fr) 170px 190px 40px auto;
   gap: 10px;
   align-items: center;
   margin-bottom: 12px;
@@ -981,6 +981,22 @@ h2 {
 
 .align-right {
   text-align: right;
+}
+
+.transaction-description {
+  display: grid;
+  gap: 4px;
+}
+
+.transaction-description strong {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.transaction-description span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
 }
 
 .category-pill {

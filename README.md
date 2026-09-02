@@ -10,6 +10,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Text-based PDF statement upload
 - Import preview with duplicate estimates before saving
 - Flexible CSV parsing for common bank column names and debit/credit formats
+- Optional account labels for statement imports and transaction filtering
 - Upload history with imported and duplicate counts
 - SQLite transaction storage
 - Rule-based starter categorization
@@ -126,6 +127,7 @@ POST /transactions/preview
 GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
 GET  /data/export
+GET  /accounts
 GET  /ask/history
 GET  /categories?month=2026-07
 GET  /categories/review?month=2026-07
@@ -165,6 +167,9 @@ CSV imports accept common bank-style headers such as `Date`, `Posting Date`,
 are stored as expenses even when the export already includes a minus sign or
 parentheses, and unsigned amount columns can use a `Type` column for debit/credit
 direction.
+Use the dashboard account label field or CSV headers like `Account` and
+`Account Name` to track which account a statement came from. Transaction list and
+CSV export requests can filter by account with `account=Chase%20Checking`.
 
 Use `GET /data/export` or the dashboard Backup button to download a JSON snapshot
 of local finance data before clearing or moving development databases.

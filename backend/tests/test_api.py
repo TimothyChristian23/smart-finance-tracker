@@ -215,9 +215,48 @@ def test_transaction_export_matches_filters():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     assert response.headers["content-disposition"] == 'attachment; filename="transactions-2026-07.csv"'
-    assert response.text.splitlines()[0] == "date,description,category,amount,source_file"
-    assert "2026-07-05,Blue Bottle Coffee,Dining,-6.75,sample.csv" in response.text
+    assert response.text.splitlines()[0] == "date,description,category,amount,source_file,account_name"
+    assert "2026-07-05,Blue Bottle Coffee,Dining,-6.75,sample.csv," in response.text
     assert "Chipotle" not in response.text
+
+
+def test_statement_uploads_can_be_labeled_and_filtered_by_account():
+    preview_response = client.post(
+        "/transactions/preview",
+        data={"account_name": " Chase Checking "},
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    )
+
+    assert preview_response.status_code == 200
+    preview_payload = preview_response.json()
+    assert preview_payload["rows"][0]["account_name"] == "Chase Checking"
+
+    response = client.post(
+        "/transactions/upload",
+        data={"account_name": " Chase Checking "},
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["account_name"] == "Chase Checking"
+    assert client.get("/accounts").json() == ["Chase Checking"]
+
+    transactions = client.get("/transactions", params={"account": "Chase Checking", "limit": 20}).json()
+    assert len(transactions) == 11
+    assert {item["account_name"] for item in transactions} == {"Chase Checking"}
+
+    uploads = client.get("/uploads").json()
+    assert uploads[0]["account_name"] == "Chase Checking"
+
+    export_response = client.get(
+        "/transactions/export",
+        params={"account": "Chase Checking", "search": "rent"},
+    )
+    assert "2026-07-01,Apartment Rent,Housing,-1450.00,sample.csv,Chase Checking" in export_response.text
+
+    backup = client.get("/data/export").json()
+    assert backup["transactions"][0]["account_name"] == "Chase Checking"
+    assert backup["uploads"][0]["account_name"] == "Chase Checking"
 
 
 def test_data_export_backup_includes_local_finance_records():

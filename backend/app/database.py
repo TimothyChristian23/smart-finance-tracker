@@ -91,6 +91,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             amount_cents INTEGER NOT NULL,
             category TEXT NOT NULL,
             source_file TEXT,
+            account_name TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -144,6 +145,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT NOT NULL,
             file_type TEXT NOT NULL,
+            account_name TEXT,
             parsed_count INTEGER NOT NULL,
             imported_count INTEGER NOT NULL,
             duplicates_skipped INTEGER NOT NULL,
@@ -173,7 +175,24 @@ def init_db(conn: sqlite3.Connection) -> None:
         ON ask_history (id)
         """
     )
+    _ensure_column(conn, "transactions", "account_name", "TEXT")
+    _ensure_column(conn, "upload_history", "account_name", "TEXT")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_transactions_account
+        ON transactions (account_name)
+        """
+    )
     conn.commit()
+
+
+def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 
 def reset_db() -> None:
@@ -210,6 +229,7 @@ def insert_transactions(rows: list[dict]) -> dict:
                 row["amount_cents"],
                 category,
                 row.get("source_file"),
+                row.get("account_name"),
             )
             if transaction_exists(conn, values):
                 result["skipped"] += 1
@@ -222,9 +242,10 @@ def insert_transactions(rows: list[dict]) -> dict:
                     description,
                     amount_cents,
                     category,
-                    source_file
+                    source_file,
+                    account_name
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 values,
             )
@@ -262,6 +283,7 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
             category = merchant_rule_for_description(conn, row["description"]) or row["category"]
             amount_cents = int(row["amount_cents"])
             source_file = row.get("source_file")
+            account_name = row.get("account_name")
             duplicate = transaction_exists(
                 conn,
                 (
@@ -270,6 +292,7 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
                     amount_cents,
                     category,
                     source_file,
+                    account_name,
                 ),
             )
             if duplicate:
@@ -293,6 +316,7 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
                 "amount": cents_to_dollars(amount_cents),
                 "category": category,
                 "source_file": source_file,
+                "account_name": account_name,
                 "duplicate": duplicate,
             })
 
@@ -325,26 +349,29 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
     }
 
 
-def record_upload(filename: str, file_type: str, rows: list[dict], result: dict) -> dict:
+def record_upload(filename: str, file_type: str, rows: list[dict], result: dict, account_name: str | None = None) -> dict:
     """Record a successful statement upload."""
     dates = sorted(row["date"] for row in rows if row.get("date"))
+    upload_account_name = account_name or account_name_from_rows(rows)
     with connect() as conn:
         cursor = conn.execute(
             """
             INSERT INTO upload_history (
                 filename,
                 file_type,
+                account_name,
                 parsed_count,
                 imported_count,
                 duplicates_skipped,
                 first_transaction_date,
                 last_transaction_date
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 filename,
                 file_type,
+                upload_account_name,
                 len(rows),
                 result["inserted"],
                 result["skipped"],
@@ -355,7 +382,7 @@ def record_upload(filename: str, file_type: str, rows: list[dict], result: dict)
         conn.commit()
         row = conn.execute(
             """
-            SELECT id, filename, file_type, parsed_count, imported_count,
+            SELECT id, filename, file_type, account_name, parsed_count, imported_count,
                    duplicates_skipped, first_transaction_date, last_transaction_date,
                    created_at
             FROM upload_history
@@ -368,13 +395,18 @@ def record_upload(filename: str, file_type: str, rows: list[dict], result: dict)
 
 def transaction_exists(conn: sqlite3.Connection, values: tuple) -> bool:
     """Return whether an equivalent transaction from the same source exists."""
-    transaction_date, description, amount_cents, _category, source_file = values
+    transaction_date, description, amount_cents, _category, source_file, account_name = values
     if source_file is None:
         source_sql = "source_file IS NULL"
         params = [transaction_date, description, amount_cents]
     else:
         source_sql = "source_file = ?"
         params = [transaction_date, description, amount_cents, source_file]
+    if account_name is None:
+        account_sql = "account_name IS NULL"
+    else:
+        account_sql = "account_name = ?"
+        params.append(account_name)
 
     row = conn.execute(
         f"""
@@ -384,11 +416,23 @@ def transaction_exists(conn: sqlite3.Connection, values: tuple) -> bool:
           AND description = ?
           AND amount_cents = ?
           AND {source_sql}
+          AND {account_sql}
         LIMIT 1
         """,
         params,
     ).fetchone()
     return row is not None
+
+
+def account_name_from_rows(rows: list[dict]) -> str | None:
+    account_names = {
+        row.get("account_name")
+        for row in rows
+        if row.get("account_name")
+    }
+    if len(account_names) == 1:
+        return account_names.pop()
+    return None
 
 
 def merchant_rule_for_description(conn: sqlite3.Connection, description: str) -> str | None:
@@ -422,7 +466,7 @@ def update_transaction_category(transaction_id: int, category: str, remember: bo
     with connect() as conn:
         row = conn.execute(
             """
-            SELECT id, transaction_date, description, amount_cents, category, source_file
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
             FROM transactions
             WHERE id = ?
             """,
@@ -456,7 +500,7 @@ def update_transaction_category(transaction_id: int, category: str, remember: bo
 
         updated = conn.execute(
             """
-            SELECT id, transaction_date, description, amount_cents, category, source_file
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
             FROM transactions
             WHERE id = ?
             """,
@@ -574,7 +618,7 @@ def list_uploads(limit: int = 20) -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT id, filename, file_type, parsed_count, imported_count,
+            SELECT id, filename, file_type, account_name, parsed_count, imported_count,
                    duplicates_skipped, first_transaction_date, last_transaction_date,
                    created_at
             FROM upload_history
@@ -586,18 +630,39 @@ def list_uploads(limit: int = 20) -> list[dict]:
     return [_upload_row_to_dict(row) for row in rows]
 
 
+def list_accounts() -> list[str]:
+    """Return account labels found on imported transactions."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT account_name
+            FROM transactions
+            WHERE account_name IS NOT NULL
+              AND trim(account_name) != ''
+            ORDER BY account_name
+            """
+        ).fetchall()
+    return [row["account_name"] for row in rows]
+
+
 def list_transactions(
     limit: int = 200,
     month: str | None = None,
     category: str | None = None,
     search: str | None = None,
+    account_name: str | None = None,
 ) -> list[dict]:
     """Return transactions with optional month, category, and description filters."""
-    where_sql, params = _transaction_filter(month=month, category=category, search=search)
+    where_sql, params = _transaction_filter(
+        month=month,
+        category=category,
+        search=search,
+        account_name=account_name,
+    )
     with connect() as conn:
         rows = conn.execute(
             f"""
-            SELECT id, transaction_date, description, amount_cents, category, source_file
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
             FROM transactions
             {where_sql}
             ORDER BY transaction_date DESC, id DESC
@@ -705,7 +770,7 @@ def category_review_queue(month: str | None = None, limit: int = 20) -> list[dic
     with connect() as conn:
         rows = conn.execute(
             f"""
-            SELECT id, transaction_date, description, amount_cents, category, source_file
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
             FROM transactions
             {where_sql}
             ORDER BY transaction_date DESC, ABS(amount_cents) DESC
@@ -920,7 +985,7 @@ def largest_expenses(month: str | None = None, limit: int = 10) -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
             f"""
-            SELECT id, transaction_date, description, amount_cents, category, source_file
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
             FROM transactions
             {where_sql}
               {"AND" if where_sql else "WHERE"} amount_cents < 0
@@ -1311,6 +1376,7 @@ def detect_anomalies(limit: int = 10, month: str | None = None) -> list[dict]:
                 t.amount_cents,
                 t.category,
                 t.source_file,
+                t.account_name,
                 s.avg_cents,
                 s.transaction_count
             FROM transactions t
@@ -1346,6 +1412,7 @@ def _transaction_row_to_dict(row: sqlite3.Row) -> dict:
         "amount": cents_to_dollars(row["amount_cents"]),
         "category": row["category"],
         "source_file": row["source_file"],
+        "account_name": row["account_name"],
     }
 
 
@@ -1406,6 +1473,7 @@ def _upload_row_to_dict(row: sqlite3.Row) -> dict:
         "id": row["id"],
         "filename": row["filename"],
         "file_type": row["file_type"],
+        "account_name": row["account_name"],
         "parsed_count": row["parsed_count"],
         "imported_count": row["imported_count"],
         "duplicates_skipped": row["duplicates_skipped"],
@@ -1658,7 +1726,7 @@ def _rank_question_transactions(question: str, month: str, limit: int) -> list[d
     with connect() as conn:
         rows = conn.execute(
             f"""
-            SELECT id, transaction_date, description, amount_cents, category, source_file
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
             FROM transactions
             {where_sql}
             ORDER BY ABS(amount_cents) DESC, transaction_date DESC
@@ -1885,6 +1953,7 @@ def _transaction_filter(
     month: str | None = None,
     category: str | None = None,
     search: str | None = None,
+    account_name: str | None = None,
 ) -> tuple[str, list[str]]:
     clauses = []
     params = []
@@ -1899,6 +1968,9 @@ def _transaction_filter(
     if search:
         clauses.append("lower(description) LIKE ?")
         params.append(f"%{search.strip().lower()}%")
+    if account_name:
+        clauses.append("account_name = ?")
+        params.append(account_name)
 
     if not clauses:
         return "", []

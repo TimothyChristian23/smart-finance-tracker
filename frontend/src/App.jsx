@@ -54,6 +54,7 @@ export default function App() {
   const [merchants, setMerchants] = useState([]);
   const [largestExpenses, setLargestExpenses] = useState([]);
   const [categoryOptions, setCategoryOptions] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [categoryReview, setCategoryReview] = useState([]);
   const [merchantRules, setMerchantRules] = useState([]);
   const [budgets, setBudgets] = useState([]);
@@ -61,7 +62,7 @@ export default function App() {
   const [recurringCharges, setRecurringCharges] = useState([]);
   const [uploads, setUploads] = useState([]);
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
-  const [transactionFilters, setTransactionFilters] = useState({ category: "", search: "" });
+  const [transactionFilters, setTransactionFilters] = useState({ account: "", category: "", search: "" });
   const [month, setMonth] = useState("");
   const [uploadPreview, setUploadPreview] = useState(null);
   const [uploadStatus, setUploadStatus] = useState("");
@@ -98,6 +99,7 @@ export default function App() {
         merchantPayload,
         largestPayload,
         categoryOptionsPayload,
+        accountPayload,
         categoryReviewPayload,
         merchantRulesPayload,
         budgetPayload,
@@ -111,6 +113,7 @@ export default function App() {
         request(`/forecast/monthly${queryString({ month: activeMonth })}`),
         request(`/transactions${queryString({
           month: activeMonth,
+          account: transactionFilters.account,
           category: transactionFilters.category,
           search: transactionFilters.search,
           limit: 50,
@@ -121,6 +124,7 @@ export default function App() {
         request(`/merchants${queryString({ month: activeMonth, limit: 6 })}`),
         request(`/expenses/largest${queryString({ month: activeMonth, limit: 6 })}`),
         request("/category-options"),
+        request("/accounts"),
         request(`/categories/review${queryString({ month: activeMonth, limit: 6 })}`),
         request("/merchant-rules"),
         request(`/budgets${queryString({ month: activeMonth })}`),
@@ -141,6 +145,7 @@ export default function App() {
       setMerchants(merchantPayload);
       setLargestExpenses(largestPayload);
       setCategoryOptions(categoryOptionsPayload);
+      setAccounts(accountPayload);
       setCategoryReview(categoryReviewPayload);
       setMerchantRules(merchantRulesPayload);
       setBudgets(budgetPayload);
@@ -171,6 +176,7 @@ export default function App() {
     setUploadStatus("Importing transactions...");
     const formData = new FormData();
     formData.append("file", file);
+    appendAccountName(formData, event.currentTarget.elements.accountName.value);
 
     try {
       const payload = await request("/transactions/upload", {
@@ -202,6 +208,7 @@ export default function App() {
     setUploadStatus("Previewing statement...");
     const formData = new FormData();
     formData.append("file", file);
+    appendAccountName(formData, event.currentTarget.form.elements.accountName.value);
 
     try {
       const preview = await request("/transactions/preview", {
@@ -274,7 +281,7 @@ export default function App() {
       setUploadPreview(null);
       setAskHistory([]);
       setBudgetDraft({ category: "", amount: "" });
-      setTransactionFilters({ category: "", search: "" });
+      setTransactionFilters({ account: "", category: "", search: "" });
       setResetConfirmation("");
       await refreshDashboard();
     } catch (error) {
@@ -397,12 +404,13 @@ export default function App() {
   }
 
   function handleClearTransactionFilters() {
-    setTransactionFilters({ category: "", search: "" });
+    setTransactionFilters({ account: "", category: "", search: "" });
   }
 
   function handleExportTransactions() {
     const params = queryString({
       month,
+      account: transactionFilters.account,
       category: transactionFilters.category,
       search: transactionFilters.search,
       limit: 5000,
@@ -528,6 +536,7 @@ export default function App() {
           <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV/PDF" />
           <form className="upload-form" onSubmit={handleUpload}>
             <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={() => setUploadPreview(null)} />
+            <input name="accountName" type="text" maxLength={80} placeholder="Account label" />
             <div className="button-row">
               <button className="ghost-button" type="button" disabled={busy} onClick={handlePreviewUpload}>
                 <Eye size={16} />
@@ -608,6 +617,7 @@ export default function App() {
           detail={`${visibleTransactions.length}${transactions.length > visibleTransactions.length ? ` of ${transactions.length}` : ""} shown`}
         />
         <TransactionFilters
+          accounts={accounts}
           categoryOptions={categoryOptions}
           filters={transactionFilters}
           onChange={handleTransactionFilterChange}
@@ -888,7 +898,7 @@ function UploadHistoryList({ uploads }) {
           <div>
             <strong>{upload.filename}</strong>
             <span>
-              {upload.file_type.toUpperCase()} | {dateRange(upload)} | {upload.duplicates_skipped} skipped
+              {upload.file_type.toUpperCase()} | {upload.account_name || "Unlabeled"} | {dateRange(upload)} | {upload.duplicates_skipped} skipped
             </span>
           </div>
           <b>{upload.imported_count}</b>
@@ -923,7 +933,7 @@ function ImportPreview({ preview }) {
           <div className={`preview-row ${row.duplicate ? "preview-duplicate" : ""}`} key={`${row.date}-${row.description}-${index}`}>
             <div>
               <strong>{row.description}</strong>
-              <span>{row.date} | {row.category}</span>
+              <span>{row.date} | {row.account_name || "Unlabeled"} | {row.category}</span>
             </div>
             <b>{money(row.amount)}</b>
           </div>
@@ -1008,7 +1018,7 @@ function formatHistoryMeta(item) {
   return item.month ? `${intent} - ${item.month}` : intent;
 }
 
-function TransactionFilters({ categoryOptions, filters, onChange, onClear, onExport, total }) {
+function TransactionFilters({ accounts, categoryOptions, filters, onChange, onClear, onExport, total }) {
   return (
     <div className="transaction-toolbar">
       <label className="transaction-filter">
@@ -1020,6 +1030,16 @@ function TransactionFilters({ categoryOptions, filters, onChange, onClear, onExp
           value={filters.search}
         />
       </label>
+      <select
+        aria-label="Filter transactions by account"
+        onChange={(event) => onChange("account", event.target.value)}
+        value={filters.account}
+      >
+        <option value="">All accounts</option>
+        {accounts.map((account) => (
+          <option key={account} value={account}>{account}</option>
+        ))}
+      </select>
       <select
         aria-label="Filter transactions by category"
         onChange={(event) => onChange("category", event.target.value)}
@@ -1048,10 +1068,15 @@ function TransactionFilters({ categoryOptions, filters, onChange, onClear, onExp
 }
 
 function TransactionRow({ categoryOptions, onCategoryChange, transaction, updating }) {
+  const sourceLabel = transaction.account_name || transaction.source_file || "Unlabeled";
+
   return (
     <>
       <div>{transaction.date}</div>
-      <div>{transaction.description}</div>
+      <div className="transaction-description">
+        <strong>{transaction.description}</strong>
+        <span>{sourceLabel}</span>
+      </div>
       <div>
         <CategoryEditor
           options={categoryOptions}
@@ -1112,6 +1137,13 @@ function queryString(params) {
   const entries = Object.entries(params).filter(([, value]) => value !== "" && value !== null && value !== undefined);
   if (!entries.length) return "";
   return `?${new URLSearchParams(entries).toString()}`;
+}
+
+function appendAccountName(formData, value) {
+  const normalized = value.trim();
+  if (normalized) {
+    formData.append("account_name", normalized);
+  }
 }
 
 function emptySummary() {

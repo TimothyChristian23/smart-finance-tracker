@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO, StringIO
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
@@ -28,6 +28,7 @@ from app.database import (
     export_backup,
     insert_transactions,
     largest_expenses,
+    list_accounts,
     list_ask_history,
     list_merchant_rules,
     list_transactions,
@@ -62,6 +63,7 @@ app.add_middleware(
 
 class UploadResponse(BaseModel):
     filename: str
+    account_name: str | None = None
     imported: int
     duplicates_skipped: int = 0
 
@@ -72,6 +74,7 @@ class ImportPreviewRow(BaseModel):
     amount: float
     category: str
     source_file: str | None = None
+    account_name: str | None = None
     duplicate: bool
 
 
@@ -101,6 +104,7 @@ class UploadHistoryResponse(BaseModel):
     id: int
     filename: str
     file_type: str
+    account_name: str | None = None
     parsed_count: int
     imported_count: int
     duplicates_skipped: int
@@ -116,6 +120,7 @@ class TransactionResponse(BaseModel):
     amount: float
     category: str
     source_file: str | None = None
+    account_name: str | None = None
 
 
 class CategoryReviewResponse(BaseModel):
@@ -314,6 +319,7 @@ DESCRIPTION_COLUMNS = [
     "narrative",
 ]
 CATEGORY_COLUMNS = ["category", "type category", "spending category"]
+ACCOUNT_COLUMNS = ["account", "account name", "account nickname", "source account", "card", "card name"]
 AMOUNT_COLUMNS = [
     "amount",
     "transaction amount",
@@ -349,23 +355,35 @@ async def health() -> dict:
 
 
 @app.post("/transactions/upload", response_model=UploadResponse)
-async def upload_transactions(file: UploadFile = File(...)) -> UploadResponse:
+async def upload_transactions(
+    file: UploadFile = File(...),
+    account_name: str | None = Form(None),
+) -> UploadResponse:
     """Upload a CSV or text-based PDF bank statement and import transactions."""
+    account_label = validate_account_name(account_name)
     filename, file_type, rows = await parse_uploaded_statement(file)
+    apply_account_label(rows, account_label)
 
     result = insert_transactions(rows)
-    record_upload(filename, file_type, rows, result)
+    record_upload(filename, file_type, rows, result, account_name=account_label)
     return UploadResponse(
         filename=filename,
+        account_name=account_label,
         imported=result["inserted"],
         duplicates_skipped=result["skipped"],
     )
 
 
 @app.post("/transactions/preview", response_model=ImportPreviewResponse)
-async def preview_transactions(file: UploadFile = File(...), limit: int = 25) -> dict:
+async def preview_transactions(
+    file: UploadFile = File(...),
+    limit: int = 25,
+    account_name: str | None = Form(None),
+) -> dict:
     """Preview parsed statement rows and duplicate estimates without importing."""
+    account_label = validate_account_name(account_name)
     filename, file_type, rows, errors = await preview_uploaded_statement(file)
+    apply_account_label(rows, account_label)
     preview = preview_import(rows, sample_limit=bounded_limit(limit, maximum=100))
     preview["errors"] = errors
     return {
@@ -381,8 +399,9 @@ async def transactions(
     month: str | None = None,
     category: str | None = None,
     search: str | None = None,
+    account: str | None = None,
 ) -> list[dict]:
-    return filtered_transactions(limit=limit, month=month, category=category, search=search)
+    return filtered_transactions(limit=limit, month=month, category=category, search=search, account=account)
 
 
 @app.get("/transactions/export")
@@ -391,12 +410,20 @@ async def export_transactions(
     month: str | None = None,
     category: str | None = None,
     search: str | None = None,
+    account: str | None = None,
 ) -> Response:
-    rows = filtered_transactions(limit=limit, month=month, category=category, search=search, maximum=5000)
+    rows = filtered_transactions(
+        limit=limit,
+        month=month,
+        category=category,
+        search=search,
+        account=account,
+        maximum=5000,
+    )
     output = StringIO()
     writer = csv.DictWriter(
         output,
-        fieldnames=["date", "description", "category", "amount", "source_file"],
+        fieldnames=["date", "description", "category", "amount", "source_file", "account_name"],
     )
     writer.writeheader()
     for row in rows:
@@ -406,6 +433,7 @@ async def export_transactions(
             "category": row["category"],
             "amount": f"{row['amount']:.2f}",
             "source_file": row["source_file"] or "",
+            "account_name": row["account_name"] or "",
         })
 
     filename = f"transactions-{month or 'all'}.csv"
@@ -425,6 +453,11 @@ async def export_data() -> Response:
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/accounts", response_model=list[str])
+async def accounts() -> list[str]:
+    return list_accounts()
 
 
 @app.get("/uploads", response_model=list[UploadHistoryResponse])
@@ -975,12 +1008,14 @@ def parse_transactions_csv_rows(content: str, source_file: str, collect_errors: 
             raise HTTPException(status_code=400, detail=message) from exc
 
         category = get_column(raw_row, CATEGORY_COLUMNS, required=False)
+        account_name = normalize_csv_account_name(get_column(raw_row, ACCOUNT_COLUMNS, required=False))
         rows.append({
             "date": parsed_date,
             "description": description,
             "amount_cents": amount_cents,
             "category": category or categorize_transaction(description, amount_cents),
             "source_file": source_file,
+            "account_name": account_name,
         })
 
     if not rows:
@@ -1179,6 +1214,37 @@ def validate_category(category: str) -> str:
     )
 
 
+def validate_account_name(account_name: str | None) -> str | None:
+    if account_name is None:
+        return None
+
+    normalized = " ".join(account_name.split())
+    if not normalized:
+        return None
+    if len(normalized) > 80:
+        raise HTTPException(status_code=400, detail="account_name must be 80 characters or fewer.")
+    return normalized
+
+
+def normalize_csv_account_name(account_name: str | None) -> str | None:
+    if not account_name:
+        return None
+
+    normalized = " ".join(account_name.split())
+    if not normalized:
+        return None
+    if len(normalized) > 80:
+        raise ValueError("account name must be 80 characters or fewer")
+    return normalized
+
+
+def apply_account_label(rows: list[dict], account_name: str | None) -> None:
+    if account_name is None:
+        return
+    for row in rows:
+        row["account_name"] = account_name
+
+
 def bounded_limit(limit: int, maximum: int = 100) -> int:
     return max(1, min(limit, maximum))
 
@@ -1188,6 +1254,7 @@ def filtered_transactions(
     month: str | None = None,
     category: str | None = None,
     search: str | None = None,
+    account: str | None = None,
     maximum: int = 200,
 ) -> list[dict]:
     return list_transactions(
@@ -1195,6 +1262,7 @@ def filtered_transactions(
         month=validate_month(month),
         category=validate_category(category) if category else None,
         search=validate_search(search),
+        account_name=validate_account_name(account),
     )
 
 
