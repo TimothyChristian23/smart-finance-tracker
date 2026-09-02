@@ -26,6 +26,7 @@ from app.database import (
     delete_merchant_rule,
     detect_anomalies,
     export_backup,
+    get_transaction,
     insert_transactions,
     largest_expenses,
     list_accounts,
@@ -48,6 +49,7 @@ from app.database import (
     top_merchants,
     upsert_budget,
     update_transaction_category,
+    update_transaction_details,
 )
 
 app = FastAPI(title="Smart Personal Finance Tracker API", version="0.1.0")
@@ -135,6 +137,14 @@ class CategoryReviewResponse(BaseModel):
 class CategoryUpdateRequest(BaseModel):
     category: str = Field(..., min_length=1, max_length=80)
     remember: bool = False
+
+
+class TransactionUpdateRequest(BaseModel):
+    date: str | None = None
+    description: str | None = Field(None, min_length=1, max_length=200)
+    amount: float | None = None
+    category: str | None = Field(None, min_length=1, max_length=80)
+    account_name: str | None = Field(None, max_length=80)
 
 
 class MerchantRuleResponse(BaseModel):
@@ -472,6 +482,39 @@ async def update_category(transaction_id: int, request: CategoryUpdateRequest) -
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found.")
     return transaction
+
+
+@app.patch("/transactions/{transaction_id}", response_model=TransactionResponse)
+async def update_transaction(transaction_id: int, request: TransactionUpdateRequest) -> dict:
+    current = get_transaction(transaction_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+
+    transaction_date = validate_transaction_date(request.date) if request.date is not None else current["date"]
+    description = (
+        validate_transaction_description(request.description)
+        if request.description is not None
+        else current["description"]
+    )
+    amount_cents = dollars_to_cents(request.amount) if request.amount is not None else dollars_to_cents(current["amount"])
+    category = validate_category(request.category) if request.category is not None else current["category"]
+    account_name = (
+        validate_account_name(request.account_name)
+        if request.account_name is not None
+        else current["account_name"]
+    )
+
+    updated = update_transaction_details(
+        transaction_id,
+        transaction_date=transaction_date,
+        description=description,
+        amount_cents=amount_cents,
+        category=category,
+        account_name=account_name,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    return updated
 
 
 @app.get("/category-options", response_model=list[str])
@@ -1201,6 +1244,22 @@ def validate_month(month: str | None) -> str | None:
     if month and not re.fullmatch(r"\d{4}-\d{2}", month):
         raise HTTPException(status_code=400, detail="month must use YYYY-MM format.")
     return month
+
+
+def validate_transaction_date(value: str) -> str:
+    try:
+        return parse_date(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def validate_transaction_description(value: str) -> str:
+    normalized = " ".join(value.split())
+    if not normalized:
+        raise HTTPException(status_code=400, detail="description cannot be empty.")
+    if len(normalized) > 200:
+        raise HTTPException(status_code=400, detail="description must be 200 characters or fewer.")
+    return normalized
 
 
 def validate_category(category: str) -> str:

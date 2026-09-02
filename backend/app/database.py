@@ -673,6 +673,58 @@ def list_transactions(
     return [_transaction_row_to_dict(row) for row in rows]
 
 
+def get_transaction(transaction_id: int) -> dict | None:
+    """Return one transaction by id."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+    return _transaction_row_to_dict(row) if row else None
+
+
+def update_transaction_details(
+    transaction_id: int,
+    *,
+    transaction_date: str,
+    description: str,
+    amount_cents: int,
+    category: str,
+    account_name: str | None,
+) -> dict | None:
+    """Update editable transaction details."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE transactions
+            SET transaction_date = ?,
+                description = ?,
+                amount_cents = ?,
+                category = ?,
+                account_name = ?
+            WHERE id = ?
+            """,
+            (transaction_date, description, amount_cents, category, account_name, transaction_id),
+        )
+        if cursor.rowcount == 0:
+            return None
+
+        row = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        conn.commit()
+    return _transaction_row_to_dict(row)
+
+
 def export_backup() -> dict:
     """Return a complete JSON-serializable snapshot of local finance data."""
     transactions = list_transactions(limit=100000)

@@ -259,6 +259,58 @@ def test_statement_uploads_can_be_labeled_and_filtered_by_account():
     assert backup["uploads"][0]["account_name"] == "Chase Checking"
 
 
+def test_update_transaction_details_recalculates_analytics():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Trader Joes"
+    )
+
+    response = client.patch(
+        f"/transactions/{transaction['id']}",
+        json={
+            "date": "2026-07-03",
+            "description": "Trader Joe's Market",
+            "amount": -90.12,
+            "category": "Dining",
+            "account_name": "Rewards Card",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["date"] == "2026-07-03"
+    assert payload["description"] == "Trader Joe's Market"
+    assert payload["amount"] == -90.12
+    assert payload["category"] == "Dining"
+    assert payload["account_name"] == "Rewards Card"
+    assert payload["source_file"] == "sample.csv"
+
+    summary = client.get("/summary?month=2026-07").json()
+    assert summary["total_spending"] == 2844.57
+
+    dining = next(item for item in client.get("/categories?month=2026-07").json() if item["category"] == "Dining")
+    assert dining["total"] == 149.69
+
+    filtered = client.get("/transactions", params={"account": "Rewards Card"}).json()
+    assert len(filtered) == 1
+    assert filtered[0]["description"] == "Trader Joe's Market"
+
+
+def test_update_transaction_details_validates_inputs():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = client.get("/transactions").json()[0]
+
+    bad_date = client.patch(f"/transactions/{transaction['id']}", json={"date": "not-a-date"})
+    bad_category = client.patch(f"/transactions/{transaction['id']}", json={"category": "Mystery"})
+
+    assert bad_date.status_code == 400
+    assert bad_date.json()["detail"] == "invalid date 'not-a-date'"
+    assert bad_category.status_code == 400
+    assert "category must be one of" in bad_category.json()["detail"]
+    assert client.patch("/transactions/999999", json={"description": "Missing"}).status_code == 404
+
+
 def test_data_export_backup_includes_local_finance_records():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = next(

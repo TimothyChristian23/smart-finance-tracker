@@ -17,6 +17,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Editable transaction categories
 - Category review queue with confidence-scored suggestions
 - Saved merchant rules that apply to future imports
+- Editable transaction details for date, description, signed amount, category, and account
 - Monthly category budgets with live progress
 - Budget recommendations from recent history and recurring charges
 - Recurring charge and subscription detection
@@ -142,6 +143,7 @@ GET  /expenses/largest?month=2026-07
 GET  /anomalies?month=2026-07
 PUT  /budgets
 PATCH /transactions/{id}/category
+PATCH /transactions/{id}
 DELETE /budgets/{id}
 DELETE /merchant-rules/{id}
 DELETE /data?confirmation=RESET

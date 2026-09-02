@@ -13,6 +13,7 @@ import {
   History,
   Lightbulb,
   MessageSquare,
+  Pencil,
   Plus,
   ReceiptText,
   Repeat2,
@@ -70,6 +71,8 @@ export default function App() {
   const [answer, setAnswer] = useState(null);
   const [askHistory, setAskHistory] = useState([]);
   const [resetConfirmation, setResetConfirmation] = useState("");
+  const [editingTransaction, setEditingTransaction] = useState(null);
+  const [editDraft, setEditDraft] = useState(emptyTransactionDraft());
   const [busy, setBusy] = useState(false);
   const [updatingTransactionId, setUpdatingTransactionId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState("");
@@ -256,6 +259,7 @@ export default function App() {
       setAnswer(null);
       setMonth("");
       setUploadPreview(null);
+      setEditingTransaction(null);
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -279,6 +283,7 @@ export default function App() {
       setAnswer(null);
       setMonth("");
       setUploadPreview(null);
+      setEditingTransaction(null);
       setAskHistory([]);
       setBudgetDraft({ category: "", amount: "" });
       setTransactionFilters({ account: "", category: "", search: "" });
@@ -309,6 +314,51 @@ export default function App() {
       setUploadStatus(error.message);
     } finally {
       setUpdatingTransactionId(null);
+    }
+  }
+
+  function handleOpenTransactionEditor(transaction) {
+    setEditingTransaction(transaction);
+    setEditDraft(transactionToDraft(transaction));
+  }
+
+  function handleCloseTransactionEditor() {
+    setEditingTransaction(null);
+    setEditDraft(emptyTransactionDraft());
+  }
+
+  async function handleTransactionEditSubmit(event) {
+    event.preventDefault();
+    if (!editingTransaction) return;
+    if (!editDraft.date || !editDraft.description.trim()) {
+      setUploadStatus("Enter a date and description.");
+      return;
+    }
+    if (editDraft.amount.trim() === "" || !Number.isFinite(Number(editDraft.amount))) {
+      setUploadStatus("Enter a valid amount.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const updated = await request(`/transactions/${editingTransaction.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: editDraft.date,
+          description: editDraft.description,
+          amount: Number(editDraft.amount),
+          category: editDraft.category,
+          account_name: editDraft.account_name,
+        }),
+      });
+      setUploadStatus(`Updated ${updated.description}.`);
+      handleCloseTransactionEditor();
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -630,10 +680,12 @@ export default function App() {
           <div className="table-heading">Description</div>
           <div className="table-heading">Category</div>
           <div className="table-heading align-right">Amount</div>
+          <div className="table-heading align-center">Edit</div>
           {visibleTransactions.map((transaction) => (
             <TransactionRow
               categoryOptions={categoryOptions}
               key={transaction.id}
+              onEdit={handleOpenTransactionEditor}
               onCategoryChange={handleCategoryChange}
               transaction={transaction}
               updating={updatingTransactionId === transaction.id}
@@ -642,6 +694,18 @@ export default function App() {
         </div>
         {!visibleTransactions.length && <p className="empty">No matching transactions.</p>}
       </section>
+
+      {editingTransaction && (
+        <TransactionEditModal
+          categoryOptions={categoryOptions}
+          draft={editDraft}
+          busy={busy}
+          onClose={handleCloseTransactionEditor}
+          onDraftChange={setEditDraft}
+          onSubmit={handleTransactionEditSubmit}
+          transaction={editingTransaction}
+        />
+      )}
     </main>
   );
 }
@@ -1067,7 +1131,7 @@ function TransactionFilters({ accounts, categoryOptions, filters, onChange, onCl
   );
 }
 
-function TransactionRow({ categoryOptions, onCategoryChange, transaction, updating }) {
+function TransactionRow({ categoryOptions, onCategoryChange, onEdit, transaction, updating }) {
   const sourceLabel = transaction.account_name || transaction.source_file || "Unlabeled";
 
   return (
@@ -1088,7 +1152,93 @@ function TransactionRow({ categoryOptions, onCategoryChange, transaction, updati
       <div className={`align-right ${transaction.amount < 0 ? "negative" : "positive"}`}>
         {money(transaction.amount)}
       </div>
+      <div className="align-center transaction-actions">
+        <button
+          aria-label={`Edit ${transaction.description}`}
+          className="row-icon-button"
+          onClick={() => onEdit(transaction)}
+          title="Edit transaction"
+          type="button"
+        >
+          <Pencil size={15} />
+        </button>
+      </div>
     </>
+  );
+}
+
+function TransactionEditModal({ busy, categoryOptions, draft, onClose, onDraftChange, onSubmit, transaction }) {
+  return (
+    <div className="modal-backdrop">
+      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="transaction-edit-title">
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">Transaction</p>
+            <h2 id="transaction-edit-title">{transaction.description}</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Close editor" title="Close editor">
+            <X size={18} />
+          </button>
+        </div>
+        <form className="transaction-edit-form" onSubmit={onSubmit}>
+          <label>
+            Date
+            <input
+              onChange={(event) => onDraftChange({ ...draft, date: event.target.value })}
+              required
+              type="date"
+              value={draft.date}
+            />
+          </label>
+          <label>
+            Description
+            <input
+              maxLength={200}
+              onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
+              required
+              value={draft.description}
+            />
+          </label>
+          <label>
+            Amount
+            <input
+              onChange={(event) => onDraftChange({ ...draft, amount: event.target.value })}
+              required
+              step="0.01"
+              type="number"
+              value={draft.amount}
+            />
+          </label>
+          <label>
+            Category
+            <select
+              onChange={(event) => onDraftChange({ ...draft, category: event.target.value })}
+              value={draft.category}
+            >
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </label>
+          <label className="full-span">
+            Account
+            <input
+              maxLength={80}
+              onChange={(event) => onDraftChange({ ...draft, account_name: event.target.value })}
+              placeholder="Account label"
+              value={draft.account_name}
+            />
+          </label>
+          <div className="modal-actions full-span">
+            <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
+            <button type="submit" disabled={busy || !draft.category}>
+              <Check size={16} />
+              Save
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -1144,6 +1294,26 @@ function appendAccountName(formData, value) {
   if (normalized) {
     formData.append("account_name", normalized);
   }
+}
+
+function emptyTransactionDraft() {
+  return {
+    date: "",
+    description: "",
+    amount: "",
+    category: "",
+    account_name: "",
+  };
+}
+
+function transactionToDraft(transaction) {
+  return {
+    date: transaction.date,
+    description: transaction.description,
+    amount: String(transaction.amount),
+    category: transaction.category,
+    account_name: transaction.account_name || "",
+  };
 }
 
 function emptySummary() {

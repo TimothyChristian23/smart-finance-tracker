@@ -112,6 +112,8 @@ h2 {
 .category-select,
 .budget-form select,
 .budget-form input,
+.transaction-edit-form select,
+.transaction-edit-form input,
 .transaction-toolbar select,
 .upload-form input,
 .ask-form textarea {
@@ -131,6 +133,8 @@ h2 {
 .category-select:focus,
 .budget-form select:focus,
 .budget-form input:focus,
+.transaction-edit-form select:focus,
+.transaction-edit-form input:focus,
 .transaction-toolbar select:focus,
 .upload-form input:focus,
 .ask-form textarea:focus {
@@ -959,7 +963,7 @@ h2 {
 
 .transaction-table {
   display: grid;
-  grid-template-columns: 120px minmax(220px, 1fr) 230px 120px;
+  grid-template-columns: 120px minmax(220px, 1fr) 230px 120px 56px;
   gap: 0;
   margin-top: 12px;
   overflow-x: auto;
@@ -983,6 +987,10 @@ h2 {
   text-align: right;
 }
 
+.align-center {
+  text-align: center;
+}
+
 .transaction-description {
   display: grid;
   gap: 4px;
@@ -997,6 +1005,11 @@ h2 {
   color: var(--muted);
   font-size: 0.76rem;
   font-weight: 800;
+}
+
+.transaction-actions {
+  display: grid;
+  place-items: center;
 }
 
 .category-pill {
@@ -1043,6 +1056,88 @@ h2 {
 .row-icon-button:hover:not(:disabled) {
   border-color: rgba(36, 120, 106, 0.46);
   color: var(--accent-dark);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(23, 33, 43, 0.42);
+  padding: 18px;
+}
+
+.modal {
+  width: min(100%, 620px);
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(23, 33, 43, 0.24);
+  padding: 16px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.modal-header h2 {
+  font-size: 1.05rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.transaction-edit-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.transaction-edit-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.transaction-edit-form input,
+.transaction-edit-form select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 9px;
+}
+
+.full-span {
+  grid-column: 1 / -1;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.modal-actions button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  font-weight: 900;
+}
+
+.modal-actions button[type="submit"] {
+  background: var(--accent);
+  color: #fff;
 }
 
 .rule-row {
@@ -1155,6 +1250,18 @@ h2 {
   }
 
   .transaction-table {
-    grid-template-columns: 110px 200px 220px 105px;
+    grid-template-columns: 110px 200px 220px 105px 56px;
+  }
+
+  .transaction-edit-form {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .modal-actions button {
+    width: 100%;
   }
 }
