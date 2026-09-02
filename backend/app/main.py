@@ -690,6 +690,7 @@ def answer_finance_question(question: str) -> AskResponse:
     normalized = question.lower()
     categories = categories_from_question(question)
     month = infer_month(question) or infer_follow_up_month(normalized)
+    account_name = infer_account(question)
 
     if looks_like_upload_history_question(normalized):
         uploads = list_uploads(limit=5)
@@ -711,6 +712,9 @@ def answer_finance_question(question: str) -> AskResponse:
             intent="upload_history",
             data=uploads,
         )
+
+    if account_name and looks_like_account_summary_question(normalized):
+        return answer_account_question(normalized, month, account_name)
 
     if looks_like_monthly_report_question(normalized):
         report_month = month or latest_imported_month()
@@ -1461,6 +1465,65 @@ def latest_imported_month() -> str | None:
     return months[0]["month"] if months else None
 
 
+def answer_account_question(question: str, month: str | None, account_name: str) -> AskResponse:
+    summaries = account_summary(month=month)
+    account = next(
+        (item for item in summaries if item["account_name"] == account_name),
+        None,
+    )
+    month_label = format_month_label(month)
+    if account is None:
+        return AskResponse(
+            answer=f"I do not have activity for {account_name} in {month_label}.",
+            month=month,
+            intent="account_summary",
+        )
+
+    if has_any(question, ["income", "earned", "deposit"]):
+        amount = account["total_income"]
+        answer = f"Income for {account_name} in {month_label} was {format_money(amount)}."
+    elif has_any(question, ["net", "saved", "savings", "cash flow"]):
+        amount = account["net"]
+        answer = f"Net cash flow for {account_name} in {month_label} was {format_money(amount)}."
+    elif has_any(question, ["transaction", "transactions", "activity"]):
+        amount = account["total_spending"]
+        answer = (
+            f"I found {account['transaction_count']} transaction"
+            f"{'' if account['transaction_count'] == 1 else 's'} for {account_name} in {month_label}: "
+            f"{format_money(account['total_spending'])} spending, "
+            f"{format_money(account['total_income'])} income, and "
+            f"{format_money(account['net'])} net."
+        )
+    else:
+        amount = account["total_spending"]
+        answer = f"Spending for {account_name} in {month_label} was {format_money(amount)}."
+
+    return AskResponse(
+        answer=answer,
+        amount=amount,
+        month=month,
+        intent="account_summary",
+        data=[account],
+    )
+
+
+def infer_account(question: str) -> str | None:
+    normalized_question = normalize_match_text(question)
+    for account in sorted(list_accounts(), key=len, reverse=True):
+        normalized_account = normalize_match_text(account)
+        if not normalized_account:
+            continue
+        if normalized_account == "cash" and "cash flow" in normalized_question:
+            continue
+        if re.search(rf"\b{re.escape(normalized_account)}\b", normalized_question):
+            return account
+    return None
+
+
+def normalize_match_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
 def infer_follow_up_month(question: str) -> str | None:
     """Reuse the previous Q&A month when the question is clearly contextual."""
     if not looks_like_follow_up_question(question):
@@ -1522,6 +1585,27 @@ def looks_like_contextual_question(question: str) -> bool:
     return (
         has_any(question, ["why", "explain", "pattern", "patterns", "stand out", "stood out", "tell me about"])
         or has_any(question, ["evidence", "cite", "cited", "supporting", "related"])
+    )
+
+
+def looks_like_account_summary_question(question: str) -> bool:
+    return has_any(
+        question,
+        [
+            "activity",
+            "deposit",
+            "earned",
+            "income",
+            "net",
+            "saved",
+            "savings",
+            "spend",
+            "spending",
+            "spent",
+            "transaction",
+            "transactions",
+            "cash flow",
+        ],
     )
 
 

@@ -32,7 +32,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Cash-flow forecasts from imported activity and upcoming recurring charges
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection
-- Deterministic question answering for spending, income, category, merchant, budget, budget recommendation, forecast, recurring charge, monthly report, largest expense, and anomaly questions
+- Deterministic question answering for spending, income, account, category, merchant, budget, budget recommendation, forecast, recurring charge, monthly report, largest expense, and anomaly questions
 - RAG-style broad Q&A with cited transaction and summary evidence
 - Local Q&A history for recent finance questions and answers
 - React dashboard scaffold
@@ -117,6 +117,7 @@ Upload `data/sample_transactions.csv` through the frontend or API. Then ask:
 ```text
 How much did I spend on food last month?
 Tell me about Amazon in July 2026
+How much did I spend on Chase Checking in July 2026?
 ```
 
 Useful API endpoints:

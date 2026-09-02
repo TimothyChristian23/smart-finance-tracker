@@ -912,6 +912,43 @@ def test_ask_handles_spending_income_and_ranking_questions():
     assert anomalies["data"][0]["description"] == "One-Time Electronics Store"
 
 
+def test_ask_handles_account_summary_questions():
+    client.post(
+        "/transactions/upload",
+        data={"account_name": "Chase Checking"},
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    )
+    client.post(
+        "/transactions",
+        json={
+            "date": "2026-07-14",
+            "description": "Cash Lunch",
+            "amount": -42.00,
+            "category": "Dining",
+            "account_name": "Cash",
+        },
+    )
+
+    spending = client.post(
+        "/ask",
+        json={"question": "How much did I spend on Chase Checking in July 2026?"},
+    ).json()
+    net = client.post(
+        "/ask",
+        json={"question": "What was my net for Cash in 2026-07?"},
+    ).json()
+
+    assert spending["intent"] == "account_summary"
+    assert spending["amount"] == 2840.87
+    assert spending["month"] == "2026-07"
+    assert spending["data"][0]["account_name"] == "Chase Checking"
+    assert "Spending for Chase Checking in 2026-07 was $2,840.87." == spending["answer"]
+    assert net["intent"] == "account_summary"
+    assert net["amount"] == -42.0
+    assert net["data"][0]["account_name"] == "Cash"
+    assert net["answer"] == "Net cash flow for Cash in 2026-07 was $-42.00."
+
+
 def test_ask_handles_budget_questions():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     client.put("/budgets", json={"month": "2026-07", "category": "Housing", "amount": 1200})
