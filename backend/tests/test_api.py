@@ -398,6 +398,25 @@ def test_ask_history_records_recent_answers():
     assert backup["ask_history"][0]["question"] == income_question
 
 
+def test_follow_up_questions_reuse_previous_qa_month():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    client.post("/ask", json={"question": "How much did I spend on food in 2026-07?"})
+
+    response = client.post("/ask", json={"question": "What about housing?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"] == "You spent $1,450.00 on Housing for 2026-07."
+    assert payload["amount"] == 1450.0
+    assert payload["categories"] == ["Housing"]
+    assert payload["month"] == "2026-07"
+    assert payload["intent"] == "category_spending"
+
+    history = client.get("/ask/history").json()
+    assert history[0]["question"] == "What about housing?"
+    assert history[0]["month"] == "2026-07"
+
+
 def test_anomalies_include_large_category_outlier():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
 

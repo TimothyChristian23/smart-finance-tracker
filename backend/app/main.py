@@ -518,7 +518,7 @@ def answer_finance_question(question: str) -> AskResponse:
     """Answer a simple spending question from structured transaction data."""
     normalized = question.lower()
     categories = categories_from_question(question)
-    month = infer_month(question)
+    month = infer_month(question) or infer_follow_up_month(normalized)
 
     if looks_like_upload_history_question(normalized):
         uploads = list_uploads(limit=5)
@@ -1173,8 +1173,26 @@ def latest_imported_month() -> str | None:
     return months[0]["month"] if months else None
 
 
+def infer_follow_up_month(question: str) -> str | None:
+    """Reuse the previous Q&A month when the question is clearly contextual."""
+    if not looks_like_follow_up_question(question):
+        return None
+
+    history = list_ask_history(limit=1)
+    if not history:
+        return None
+    return history[0]["month"]
+
+
 def has_any(text: str, terms: list[str]) -> bool:
     return any(term in text for term in terms)
+
+
+def looks_like_follow_up_question(question: str) -> bool:
+    return (
+        question.startswith(("what about", "how about", "and ", "also "))
+        or has_any(question, ["same month", "that month", "for that period"])
+    )
 
 
 def looks_like_top_category_question(question: str) -> bool:

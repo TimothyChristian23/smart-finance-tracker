@@ -177,6 +177,8 @@ or apply a recommendation directly from the dashboard.
 Broad Q&A questions retrieve relevant transaction evidence and return citations in
 the answer card. Exact totals still come from deterministic database calculations.
 Recent Q&A exchanges are saved locally and included in full JSON backups.
+Clear follow-up questions such as `What about housing?` reuse the previous Q&A
+month when no new month is provided.
 
 The category review queue surfaces uncertain imported categories and suggests a
 more likely category when the rule hints have enough signal. Applying a suggestion
