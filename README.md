@@ -38,7 +38,8 @@ The first implementation slice focuses on trustworthy analytics:
 - Local Q&A history for recent finance questions and answers
 - React dashboard scaffold
 - Locked frontend dependency install and production build
-- GitHub Actions backend test and frontend build workflows
+- Browser UI smoke test for import, manual transactions, backup/restore, and Q&A
+- GitHub Actions backend test, frontend build, and UI smoke workflows
 
 Future AI layers can improve categorization, explain trends, and add RAG over statement
 notes and transaction context.
@@ -240,4 +241,16 @@ cd frontend
 npm run build
 ```
 
-GitHub Actions runs backend tests and the frontend production build on pushes and pull requests.
+Run the browser smoke test locally:
+
+```bash
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+```
+
+On Windows, set `NODE_OPTIONS=--use-system-ca` first if Playwright install hits
+the local certificate error noted above.
+
+GitHub Actions runs backend tests, the frontend production build, and the UI
+smoke test on pushes and pull requests.

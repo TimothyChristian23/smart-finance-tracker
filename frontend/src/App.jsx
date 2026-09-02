@@ -177,7 +177,8 @@ export default function App() {
 
   async function handleUpload(event) {
     event.preventDefault();
-    const file = event.currentTarget.elements.statement.files[0];
+    const form = event.currentTarget;
+    const file = form.elements.statement.files[0];
     if (!file) {
       setUploadStatus("Choose a statement file first.");
       return;
@@ -187,7 +188,7 @@ export default function App() {
     setUploadStatus("Importing transactions...");
     const formData = new FormData();
     formData.append("file", file);
-    appendAccountName(formData, event.currentTarget.elements.accountName.value);
+    appendAccountName(formData, form.elements.accountName.value);
 
     try {
       const payload = await request("/transactions/upload", {
@@ -199,7 +200,7 @@ export default function App() {
         ? `Imported ${payload.imported} transactions and skipped ${skipped} duplicates from ${payload.filename}.`
         : `Imported ${payload.imported} transactions from ${payload.filename}.`);
       setUploadPreview(null);
-      event.currentTarget.reset();
+      form.reset();
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -309,7 +310,8 @@ export default function App() {
 
   async function handleRestoreBackup(event) {
     event.preventDefault();
-    const file = event.currentTarget.elements.backup.files[0];
+    const form = event.currentTarget;
+    const file = form.elements.backup.files[0];
     if (restoreConfirmation !== "RESTORE") {
       setUploadStatus("Type RESTORE first.");
       return;
@@ -341,7 +343,7 @@ export default function App() {
       setTransactionFilters({ account: "", category: "", search: "" });
       setResetConfirmation("");
       setRestoreConfirmation("");
-      event.currentTarget.reset();
+      form.reset();
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -660,7 +662,7 @@ export default function App() {
           <RecurringList charges={recurringCharges} />
         </section>
 
-        <section className="panel action-panel">
+        <section className="panel action-panel" data-testid="import-panel">
           <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV/PDF" />
           <form className="upload-form" onSubmit={handleUpload}>
             <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={() => setUploadPreview(null)} />
@@ -681,7 +683,7 @@ export default function App() {
               </button>
             </div>
           </form>
-          {uploadStatus && <p className="helper-text">{uploadStatus}</p>}
+          {uploadStatus && <p className="helper-text" data-testid="status-message">{uploadStatus}</p>}
           {uploadPreview && <ImportPreview preview={uploadPreview} />}
         </section>
 
@@ -695,7 +697,7 @@ export default function App() {
           <AccountSummaryList accounts={accountSummary} />
         </section>
 
-        <section className="panel privacy-panel">
+        <section className="panel privacy-panel" data-testid="privacy-panel">
           <PanelTitle icon={<Shield size={18} />} title="Privacy" detail="Local data" />
           <form className="privacy-form" onSubmit={handleResetLocalData}>
             <input
@@ -726,7 +728,7 @@ export default function App() {
           </form>
         </section>
 
-        <section className="panel ask-panel">
+        <section className="panel ask-panel" data-testid="ask-panel">
           <PanelTitle icon={<MessageSquare size={18} />} title="Ask About Spending" detail={selectedMonthLabel} />
           <form className="ask-form" onSubmit={handleAsk}>
             <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={3} />
@@ -757,7 +759,7 @@ export default function App() {
         </section>
       </section>
 
-      <section className="panel transactions-panel">
+      <section className="panel transactions-panel" data-testid="transactions-panel">
         <PanelTitle
           icon={<CircleDollarSign size={18} />}
           title="Transactions"
@@ -1329,7 +1331,13 @@ function TransactionEditModal({ busy, categoryOptions, draft, mode = "edit", onC
 
   return (
     <div className="modal-backdrop">
-      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="transaction-edit-title">
+      <section
+        className="modal"
+        data-testid="transaction-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="transaction-edit-title"
+      >
         <div className="modal-header">
           <div>
             <p className="eyebrow">{isCreate ? "Manual entry" : "Transaction"}</p>

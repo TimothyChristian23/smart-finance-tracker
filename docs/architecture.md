@@ -29,6 +29,10 @@ then replaces local durable records and lets summaries recompute from SQLite.
 Full local reset requires a typed `RESET` confirmation in both the dashboard and
 API, then clears transactions, uploads, budgets, merchant rules, and Q&A history.
 
+The UI smoke workflow starts FastAPI and Vite against an isolated SQLite database,
+then drives the browser through import preview/import, manual transaction
+add/edit/delete, backup download, reset/restore, and account-aware Q&A.
+
 ## Future AI Layer
 
 - LLM-assisted category suggestions with user review
