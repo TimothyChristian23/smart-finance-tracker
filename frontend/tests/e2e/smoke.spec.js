@@ -33,9 +33,11 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
     `Previewed ${sampleTransactionCount} rows from sample_transactions.csv.`,
   );
   await expect(importPanel.getByText(`${sampleTransactionCount} importable`)).toBeVisible();
+  await importPanel.getByLabel("Category for Trader Joes").first().selectOption("Dining");
+  await expect(importPanel.getByText("Manual review: Category selected during import review.")).toBeVisible();
 
-  await importPanel.getByRole("button", { name: "Import" }).click();
-  await expect(page.getByTestId("status-message")).toContainText(`Imported ${sampleTransactionCount} transactions`);
+  await importPanel.getByRole("button", { name: "Import Reviewed" }).click();
+  await expect(page.getByTestId("status-message")).toContainText(`Imported ${sampleTransactionCount} reviewed transactions`);
 
   await page.getByLabel("Month").selectOption("2026-07");
   const transactionsPanel = page.getByTestId("transactions-panel");

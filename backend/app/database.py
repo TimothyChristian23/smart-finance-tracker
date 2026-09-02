@@ -214,7 +214,7 @@ def reset_all_data() -> None:
         conn.commit()
 
 
-def insert_transactions(rows: list[dict]) -> dict:
+def insert_transactions(rows: list[dict], apply_merchant_rules: bool = True) -> dict:
     """Insert parsed transactions and return inserted/skipped counts."""
     result = {"inserted": 0, "skipped": 0}
     if not rows:
@@ -222,7 +222,9 @@ def insert_transactions(rows: list[dict]) -> dict:
 
     with connect() as conn:
         for row in rows:
-            category = merchant_rule_for_description(conn, row["description"]) or row["category"]
+            category = row["category"]
+            if apply_merchant_rules:
+                category = merchant_rule_for_description(conn, row["description"]) or category
             values = (
                 row["date"],
                 row["description"],

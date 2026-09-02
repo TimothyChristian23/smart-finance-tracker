@@ -179,6 +179,10 @@ export default function App() {
     event.preventDefault();
     const form = event.currentTarget;
     const file = form.elements.statement.files[0];
+    if (uploadPreview?.rows?.length) {
+      await handleReviewedImport(form);
+      return;
+    }
     if (!file) {
       setUploadStatus("Choose a statement file first.");
       return;
@@ -223,7 +227,7 @@ export default function App() {
     appendAccountName(formData, event.currentTarget.form.elements.accountName.value);
 
     try {
-      const preview = await request("/transactions/preview", {
+      const preview = await request("/transactions/preview?limit=5000", {
         method: "POST",
         body: formData,
       });
@@ -235,6 +239,45 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleReviewedImport(form) {
+    setBusy(true);
+    setUploadStatus("Importing reviewed transactions...");
+
+    try {
+      const payload = await request("/transactions/import-reviewed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: uploadPreview.filename,
+          file_type: uploadPreview.file_type,
+          account_name: form.elements.accountName.value || null,
+          rows: uploadPreview.rows.map((row) => ({
+            date: row.date,
+            description: row.description,
+            amount: row.amount,
+            category: row.category,
+            account_name: row.account_name,
+          })),
+        }),
+      });
+      const skipped = payload.duplicates_skipped || 0;
+      setUploadStatus(skipped
+        ? `Imported ${payload.imported} reviewed transactions and skipped ${skipped} duplicates from ${payload.filename}.`
+        : `Imported ${payload.imported} reviewed transactions from ${payload.filename}.`);
+      setUploadPreview(null);
+      form.reset();
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handlePreviewCategoryChange(index, category) {
+    setUploadPreview((preview) => previewWithRowCategory(preview, index, category));
   }
 
   async function handleAsk(event) {
@@ -666,13 +709,15 @@ export default function App() {
           <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV/PDF" />
           <form className="upload-form" onSubmit={handleUpload}>
             <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={() => setUploadPreview(null)} />
-            <input name="accountName" type="text" maxLength={80} placeholder="Account label" />
+            <input name="accountName" type="text" maxLength={80} placeholder="Account label" onChange={() => setUploadPreview(null)} />
             <div className="button-row">
               <button className="ghost-button" type="button" disabled={busy} onClick={handlePreviewUpload}>
                 <Eye size={16} />
                 Preview
               </button>
-              <button type="submit" disabled={busy}>Import</button>
+              <button type="submit" disabled={busy || (uploadPreview && !uploadPreview.rows?.length)}>
+                {uploadPreview?.rows?.length ? "Import Reviewed" : "Import"}
+              </button>
               <button className="ghost-button" type="button" disabled={busy} onClick={handleExportBackup}>
                 <Download size={16} />
                 Backup
@@ -684,7 +729,13 @@ export default function App() {
             </div>
           </form>
           {uploadStatus && <p className="helper-text" data-testid="status-message">{uploadStatus}</p>}
-          {uploadPreview && <ImportPreview preview={uploadPreview} />}
+          {uploadPreview && (
+            <ImportPreview
+              categoryOptions={categoryOptions}
+              onCategoryChange={handlePreviewCategoryChange}
+              preview={uploadPreview}
+            />
+          )}
         </section>
 
         <section className="panel uploads-panel">
@@ -1111,7 +1162,7 @@ function AccountSummaryList({ accounts }) {
   );
 }
 
-function ImportPreview({ preview }) {
+function ImportPreview({ categoryOptions, onCategoryChange, preview }) {
   const errors = preview.errors || [];
 
   return (
@@ -1132,7 +1183,7 @@ function ImportPreview({ preview }) {
         </div>
       )}
       <div className="preview-rows">
-        {preview.rows.slice(0, 5).map((row, index) => (
+        {preview.rows.map((row, index) => (
           <div className={`preview-row ${row.duplicate ? "preview-duplicate" : ""}`} key={`${row.date}-${row.description}-${index}`}>
             <div>
               <strong>{row.description}</strong>
@@ -1141,7 +1192,19 @@ function ImportPreview({ preview }) {
                 <small>{row.category_source_label || "Category signal"}: {row.category_reason}</small>
               )}
             </div>
-            <b>{money(row.amount)}</b>
+            <div className="preview-row-controls">
+              <b>{money(row.amount)}</b>
+              <select
+                aria-label={`Category for ${row.description}`}
+                disabled={row.duplicate || !categoryOptions.length}
+                onChange={(event) => onCategoryChange(index, event.target.value)}
+                value={row.category}
+              >
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+            </div>
           </div>
         ))}
       </div>
@@ -1580,6 +1643,43 @@ function categoryPreviewLabel(row) {
     return `${row.category} -> ${row.suggested_category}${confidence}`;
   }
   return `${row.category}${confidence}`;
+}
+
+function previewWithRowCategory(preview, index, category) {
+  if (!preview) return preview;
+  const rows = preview.rows.map((row, rowIndex) => {
+    if (rowIndex !== index) return row;
+    return {
+      ...row,
+      category,
+      suggested_category: category,
+      category_confidence: null,
+      category_confidence_label: "reviewed",
+      category_source: "manual_review",
+      category_source_label: "Manual review",
+      category_reason: "Category selected during import review.",
+      matched_terms: [],
+    };
+  });
+  return {
+    ...preview,
+    categories: summarizePreviewCategories(rows),
+    rows,
+  };
+}
+
+function summarizePreviewCategories(rows) {
+  const totals = new Map();
+  rows.forEach((row) => {
+    if (Number(row.amount) >= 0) return;
+    const current = totals.get(row.category) || { category: row.category, total: 0, transaction_count: 0 };
+    current.total += Math.abs(Number(row.amount) || 0);
+    current.transaction_count += 1;
+    totals.set(row.category, current);
+  });
+  return Array.from(totals.values())
+    .map((item) => ({ ...item, total: Number(item.total.toFixed(2)) }))
+    .sort((left, right) => right.total - left.total);
 }
 
 function dateRange(upload) {

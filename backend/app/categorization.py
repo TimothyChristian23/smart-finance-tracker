@@ -87,13 +87,14 @@ def categorize_transaction(description: str, amount_cents: int) -> str:
     """Assign a starter category from high-confidence merchant text and amount direction."""
     normalized = normalize_text(description)
 
-    match = first_category_keyword_match(normalized, CATEGORY_KEYWORDS)
+    if amount_cents > 0:
+        return "Income"
+
+    match = first_category_keyword_match(normalized, expense_category_keywords())
     if match:
         category, _keyword = match
         return category
 
-    if amount_cents > 0:
-        return "Income"
     return "Other"
 
 
@@ -107,6 +108,15 @@ def first_category_keyword_match(
             if keyword_matches(normalized_description, keyword):
                 return category, keyword
     return None
+
+
+def expense_category_keywords() -> dict[str, list[str]]:
+    """Return category keywords that should apply to spending transactions."""
+    return {
+        category: keywords
+        for category, keywords in CATEGORY_KEYWORDS.items()
+        if category != "Income"
+    }
 
 
 def keyword_matches(normalized_description: str, keyword: str) -> bool:
@@ -181,7 +191,7 @@ def suggest_category(description: str, amount_cents: int, current_category: str 
             "reason": "Positive transaction amounts are treated as income.",
         }
 
-    strong_match = first_category_keyword_match(normalized, CATEGORY_KEYWORDS)
+    strong_match = first_category_keyword_match(normalized, expense_category_keywords())
     if strong_match:
         category, keyword = strong_match
         confidence = 0.95 if category != current else 0.92

@@ -9,6 +9,7 @@ The first implementation slice focuses on trustworthy analytics:
 - CSV transaction upload
 - Text-based PDF statement upload
 - Import preview with duplicate estimates before saving
+- Reviewed import flow with editable preview categories before saving
 - Manual transaction entry for cash purchases or one-off corrections
 - Flexible CSV parsing for common bank column names and debit/credit formats
 - Optional account labels for statement imports and transaction filtering
@@ -132,6 +133,7 @@ GET  /months
 GET  /uploads
 POST /transactions
 POST /transactions/preview
+POST /transactions/import-reviewed
 GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
 GET  /data/export
@@ -170,9 +172,10 @@ Statements that are scanned images will need OCR support before they can be impo
 
 Use import preview from the dashboard or `POST /transactions/preview` to inspect
 normalized rows, category assignments, totals, and duplicate estimates before
-saving statement data. CSV preview keeps valid rows visible and reports row-level
-errors for lines that need cleanup; importing remains strict and rejects files
-with invalid rows.
+saving statement data. In the dashboard, preview categories can be edited before
+saving through the reviewed import flow. CSV preview keeps valid rows visible and
+reports row-level errors for lines that need cleanup; direct file importing remains
+strict and rejects files with invalid rows.
 CSV imports accept common bank-style headers such as `Date`, `Posting Date`,
 `Transaction Date`, `Description`, `Transaction Description`, `Payee`, `Memo`,
 `Amount`, `Transaction Amount`, `Debit Amount`, and `Credit Amount`. Debit values

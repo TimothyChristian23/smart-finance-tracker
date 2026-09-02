@@ -114,6 +114,21 @@ class ImportPreviewResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class ReviewedImportRowRequest(BaseModel):
+    date: str
+    description: str = Field(..., min_length=1, max_length=200)
+    amount: float
+    category: str = Field(..., min_length=1, max_length=80)
+    account_name: str | None = Field(None, max_length=80)
+
+
+class ReviewedImportRequest(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=260)
+    file_type: str = Field(..., min_length=1, max_length=20)
+    account_name: str | None = Field(None, max_length=80)
+    rows: list[ReviewedImportRowRequest] = Field(..., min_length=1, max_length=5000)
+
+
 class UploadHistoryResponse(BaseModel):
     id: int
     filename: str
@@ -439,13 +454,31 @@ async def preview_transactions(
     account_label = validate_account_name(account_name)
     filename, file_type, rows, errors = await preview_uploaded_statement(file)
     apply_account_label(rows, account_label)
-    preview = preview_import(rows, sample_limit=bounded_limit(limit, maximum=100))
+    preview = preview_import(rows, sample_limit=bounded_limit(limit, maximum=5000))
     preview["errors"] = errors
     return {
         "filename": filename,
         "file_type": file_type,
         **preview,
     }
+
+
+@app.post("/transactions/import-reviewed", response_model=UploadResponse)
+async def import_reviewed_transactions(request: ReviewedImportRequest) -> UploadResponse:
+    """Import user-reviewed preview rows with edited categories."""
+    filename = validate_source_filename(request.filename)
+    file_type = validate_statement_file_type(request.file_type)
+    account_label = validate_account_name(request.account_name)
+    rows = reviewed_import_rows(request, filename, account_label)
+
+    result = insert_transactions(rows, apply_merchant_rules=False)
+    record_upload(filename, file_type, rows, result, account_name=account_label)
+    return UploadResponse(
+        filename=filename,
+        account_name=account_label,
+        imported=result["inserted"],
+        duplicates_skipped=result["skipped"],
+    )
 
 
 @app.get("/transactions", response_model=list[TransactionResponse])
@@ -1398,6 +1431,44 @@ def apply_account_label(rows: list[dict], account_name: str | None) -> None:
         return
     for row in rows:
         row["account_name"] = account_name
+
+
+def reviewed_import_rows(
+    request: ReviewedImportRequest,
+    filename: str,
+    account_override: str | None,
+) -> list[dict]:
+    rows = []
+    for index, row in enumerate(request.rows, start=1):
+        try:
+            account_name = account_override if account_override is not None else validate_account_name(row.account_name)
+            rows.append({
+                "date": validate_transaction_date(row.date),
+                "description": validate_transaction_description(row.description),
+                "amount_cents": dollars_to_cents(row.amount),
+                "category": validate_category(row.category),
+                "source_file": filename,
+                "account_name": account_name,
+            })
+        except HTTPException as exc:
+            raise HTTPException(status_code=400, detail=f"rows[{index}]: {exc.detail}") from exc
+    return rows
+
+
+def validate_source_filename(filename: str) -> str:
+    normalized = Path(filename).name.strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="filename cannot be empty.")
+    if len(normalized) > 260:
+        raise HTTPException(status_code=400, detail="filename must be 260 characters or fewer.")
+    return normalized
+
+
+def validate_statement_file_type(file_type: str) -> str:
+    normalized = file_type.strip().lower()
+    if normalized not in {"csv", "pdf"}:
+        raise HTTPException(status_code=400, detail="file_type must be csv or pdf.")
+    return normalized
 
 
 def bounded_limit(limit: int, maximum: int = 100) -> int:

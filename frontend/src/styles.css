@@ -525,6 +525,8 @@ h2 {
 .preview-rows {
   display: grid;
   gap: 7px;
+  max-height: 380px;
+  overflow: auto;
 }
 
 .preview-row {
@@ -571,10 +573,28 @@ h2 {
   line-height: 1.35;
 }
 
-.preview-row b {
+.preview-row-controls {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+  min-width: 138px;
+}
+
+.preview-row-controls b {
   color: var(--ink);
   font-size: 0.86rem;
   white-space: nowrap;
+}
+
+.preview-row-controls select {
+  width: 138px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 850;
+  padding: 0 8px;
 }
 
 .list {
@@ -1295,6 +1315,23 @@ h2 {
 
   .preview-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .preview-row {
+    display: grid;
+  }
+
+  .preview-row-controls {
+    min-width: 0;
+    justify-items: stretch;
+  }
+
+  .preview-row-controls b {
+    text-align: left;
+  }
+
+  .preview-row-controls select {
+    width: 100%;
   }
 
   .budget-form {

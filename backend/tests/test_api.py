@@ -146,6 +146,112 @@ def test_preview_includes_category_explanations_and_saved_rules():
     assert "Saved merchant rule" in saved_rule_row["category_reason"]
 
 
+def test_reviewed_import_preserves_edited_categories_and_logs_upload():
+    response = client.post(
+        "/transactions/import-reviewed",
+        json={
+            "filename": "reviewed.csv",
+            "file_type": "csv",
+            "account_name": "Rewards Card",
+            "rows": [
+                {
+                    "date": "2026-07-02",
+                    "description": "Trader Joes",
+                    "amount": -86.42,
+                    "category": "Dining",
+                    "account_name": None,
+                },
+                {
+                    "date": "2026-07-03",
+                    "description": "Payroll Deposit",
+                    "amount": 3200.00,
+                    "category": "Income",
+                    "account_name": None,
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "filename": "reviewed.csv",
+        "account_name": "Rewards Card",
+        "imported": 2,
+        "duplicates_skipped": 0,
+    }
+
+    transactions = client.get("/transactions?limit=10").json()
+    by_description = {item["description"]: item for item in transactions}
+    assert by_description["Trader Joes"]["category"] == "Dining"
+    assert by_description["Trader Joes"]["account_name"] == "Rewards Card"
+    assert by_description["Trader Joes"]["source_file"] == "reviewed.csv"
+
+    uploads = client.get("/uploads").json()
+    assert uploads[0]["filename"] == "reviewed.csv"
+    assert uploads[0]["parsed_count"] == 2
+    assert uploads[0]["imported_count"] == 2
+    assert uploads[0]["account_name"] == "Rewards Card"
+
+
+def test_reviewed_import_user_category_overrides_saved_merchant_rule():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Trader Joes"
+    )
+    client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": True},
+    )
+
+    response = client.post(
+        "/transactions/import-reviewed",
+        json={
+            "filename": "reviewed.csv",
+            "file_type": "csv",
+            "rows": [
+                {
+                    "date": "2026-08-02",
+                    "description": "Trader Joes",
+                    "amount": -50.00,
+                    "category": "Food & Grocery",
+                    "account_name": "Cash",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    reviewed = client.get(
+        "/transactions",
+        params={"month": "2026-08", "search": "Trader Joes"},
+    ).json()
+    assert reviewed[0]["category"] == "Food & Grocery"
+    assert reviewed[0]["account_name"] == "Cash"
+
+
+def test_reviewed_import_validates_rows():
+    response = client.post(
+        "/transactions/import-reviewed",
+        json={
+            "filename": "reviewed.csv",
+            "file_type": "csv",
+            "rows": [
+                {
+                    "date": "not-a-date",
+                    "description": "Mystery Store",
+                    "amount": -12.34,
+                    "category": "Mystery",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "rows[1]: invalid date 'not-a-date'"
+    assert client.get("/transactions").json() == []
+
+
 def test_preview_reports_csv_row_errors_without_importing():
     csv_content = """Date,Description,Amount
 2026-07-01,Payroll Deposit,3200.00
