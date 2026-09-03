@@ -27,8 +27,36 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(page.getByText("Online")).toBeVisible();
 
   const importPanel = page.getByTestId("import-panel");
+  const customCsvPath = testInfo.outputPath("custom-bank.csv");
+  fs.writeFileSync(
+    customCsvPath,
+    [
+      "Posted,Payee,Outflow,Inflow,Bucket,Wallet",
+      "10/01/2026,Farmers Market,42.37,,Food & Grocery,Travel Checking",
+      "10/02/2026,Payroll Deposit,,3200.00,Income,Travel Checking",
+    ].join("\n"),
+  );
+
+  const presetPanel = page.getByTestId("csv-preset-panel");
+  await presetPanel.getByLabel("Preset name").fill("Travel Checking");
+  await presetPanel.getByLabel("Date column").fill("Posted");
+  await presetPanel.getByLabel("Description column").fill("Payee");
+  await presetPanel.getByLabel("Debit column").fill("Outflow");
+  await presetPanel.getByLabel("Credit column").fill("Inflow");
+  await presetPanel.getByLabel("Category column").fill("Bucket");
+  await presetPanel.getByLabel("Account column").fill("Wallet");
+  await presetPanel.getByRole("button", { name: "Save Mapping" }).click();
+  await expect(page.getByTestId("status-message")).toHaveText("Saved CSV mapping Travel Checking.");
+
+  await importPanel.locator('input[name="statement"]').setInputFiles(customCsvPath);
+  await importPanel.getByLabel("CSV mapping preset").selectOption({ label: "Travel Checking" });
+  await importPanel.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByTestId("status-message")).toHaveText("Previewed 2 rows from custom-bank.csv.");
+  await expect(importPanel.getByText("Farmers Market", { exact: true })).toBeVisible();
+
   await importPanel.locator('input[name="statement"]').setInputFiles(sampleCsvPath);
   await importPanel.getByPlaceholder("Account label").fill("Chase Checking");
+  await importPanel.getByLabel("CSV mapping preset").selectOption("");
   await importPanel.getByRole("button", { name: "Preview" }).click();
   await expect(page.getByTestId("status-message")).toHaveText(
     `Previewed ${sampleTransactionCount} rows from sample_transactions.csv.`,

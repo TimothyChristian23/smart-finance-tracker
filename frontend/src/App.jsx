@@ -60,6 +60,7 @@ export default function App() {
   const [accountSummary, setAccountSummary] = useState([]);
   const [categoryReview, setCategoryReview] = useState([]);
   const [merchantRules, setMerchantRules] = useState([]);
+  const [csvPresets, setCsvPresets] = useState([]);
   const [budgets, setBudgets] = useState([]);
   const [budgetRecommendations, setBudgetRecommendations] = useState([]);
   const [recurringCharges, setRecurringCharges] = useState([]);
@@ -68,6 +69,7 @@ export default function App() {
   const [uploads, setUploads] = useState([]);
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
   const [ruleDraft, setRuleDraft] = useState(emptyRuleDraft());
+  const [csvPresetDraft, setCsvPresetDraft] = useState(emptyCsvPresetDraft());
   const [transactionFilters, setTransactionFilters] = useState({ account: "", category: "", search: "" });
   const [month, setMonth] = useState("");
   const [uploadPreview, setUploadPreview] = useState(null);
@@ -91,6 +93,7 @@ export default function App() {
     || uploads.length
     || budgets.length
     || merchantRules.length
+    || csvPresets.length
     || ignoredRecurring.length
     || ignoredAnomalies.length
     || askHistory.length
@@ -122,6 +125,7 @@ export default function App() {
         accountSummaryPayload,
         categoryReviewPayload,
         merchantRulesPayload,
+        csvPresetsPayload,
         budgetPayload,
         budgetRecommendationPayload,
         recurringPayload,
@@ -150,6 +154,7 @@ export default function App() {
         request(`/accounts/summary${queryString({ month: activeMonth })}`),
         request(`/categories/review${queryString({ month: activeMonth, limit: 6 })}`),
         request("/merchant-rules"),
+        request("/csv-mapping-presets"),
         request(`/budgets${queryString({ month: activeMonth })}`),
         request(`/budgets/recommendations${queryString({ month: activeMonth, limit: 6 })}`),
         request("/recurring?limit=6"),
@@ -174,6 +179,7 @@ export default function App() {
       setAccountSummary(accountSummaryPayload);
       setCategoryReview(categoryReviewPayload);
       setMerchantRules(merchantRulesPayload);
+      setCsvPresets(csvPresetsPayload);
       setBudgets(budgetPayload);
       setBudgetRecommendations(budgetRecommendationPayload);
       setRecurringCharges(recurringPayload);
@@ -210,6 +216,7 @@ export default function App() {
     const formData = new FormData();
     formData.append("file", file);
     appendAccountName(formData, form.elements.accountName.value);
+    appendCsvPresetId(formData, form.elements.csvPresetId.value);
 
     try {
       const payload = await request("/transactions/upload", {
@@ -242,6 +249,7 @@ export default function App() {
     const formData = new FormData();
     formData.append("file", file);
     appendAccountName(formData, event.currentTarget.form.elements.accountName.value);
+    appendCsvPresetId(formData, event.currentTarget.form.elements.csvPresetId.value);
 
     try {
       const preview = await request("/transactions/preview?limit=5000", {
@@ -344,7 +352,7 @@ export default function App() {
       setUploadStatus("Type RESET first.");
       return;
     }
-    if (!window.confirm("Reset all local finance data? This deletes transactions, upload history, budgets, merchant rules, recurring ignores, anomaly dismissals, and Q&A history.")) return;
+    if (!window.confirm("Reset all local finance data? This deletes transactions, upload history, budgets, merchant rules, CSV mapping presets, recurring ignores, anomaly dismissals, and Q&A history.")) return;
 
     setBusy(true);
     try {
@@ -358,6 +366,8 @@ export default function App() {
       setAskHistory([]);
       setBudgetDraft({ category: "", amount: "" });
       setRuleDraft(emptyRuleDraft());
+      setCsvPresetDraft(emptyCsvPresetDraft());
+      setCsvPresets([]);
       setIgnoredRecurring([]);
       setIgnoredAnomalies([]);
       setTransactionFilters({ account: "", category: "", search: "" });
@@ -404,6 +414,8 @@ export default function App() {
       setAskHistory([]);
       setBudgetDraft({ category: "", amount: "" });
       setRuleDraft(emptyRuleDraft());
+      setCsvPresetDraft(emptyCsvPresetDraft());
+      setCsvPresets([]);
       setIgnoredRecurring([]);
       setIgnoredAnomalies([]);
       setTransactionFilters({ account: "", category: "", search: "" });
@@ -550,6 +562,49 @@ export default function App() {
         ? `Saved ${payload.rule.category} rule for ${payload.rule.merchant} and updated ${payload.updated_transactions} ${transactionText}.`
         : `Saved ${payload.rule.category} rule for ${payload.rule.merchant}.`);
       setRuleDraft({ ...emptyRuleDraft(), category: payload.rule.category });
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCsvPresetSubmit(event) {
+    event.preventDefault();
+    const preset = csvPresetPayload(csvPresetDraft);
+    if (!preset.name || !preset.date_column || !preset.description_column) {
+      setUploadStatus("Enter a preset name, date column, and description column.");
+      return;
+    }
+    if (!preset.amount_column && !preset.debit_column && !preset.credit_column) {
+      setUploadStatus("Enter an amount, debit, or credit column.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const saved = await request("/csv-mapping-presets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preset),
+      });
+      setCsvPresetDraft(emptyCsvPresetDraft());
+      setUploadStatus(`Saved CSV mapping ${saved.name}.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteCsvPreset(preset) {
+    setBusy(true);
+    try {
+      await request(`/csv-mapping-presets/${preset.id}`, { method: "DELETE" });
+      setCsvPresetDraft((draft) => (draft.name === preset.name ? emptyCsvPresetDraft() : draft));
+      setUploadStatus(`Removed CSV mapping ${preset.name}.`);
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -832,6 +887,12 @@ export default function App() {
           <form className="upload-form" onSubmit={handleUpload}>
             <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={() => setUploadPreview(null)} />
             <input name="accountName" type="text" maxLength={80} placeholder="Account label" onChange={() => setUploadPreview(null)} />
+            <select name="csvPresetId" aria-label="CSV mapping preset" onChange={() => setUploadPreview(null)}>
+              <option value="">Auto mapping</option>
+              {csvPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.name}</option>
+              ))}
+            </select>
             <div className="button-row">
               <button className="ghost-button" type="button" disabled={busy} onClick={handlePreviewUpload}>
                 <Eye size={16} />
@@ -851,6 +912,15 @@ export default function App() {
             </div>
           </form>
           {uploadStatus && <p className="helper-text" data-testid="status-message">{uploadStatus}</p>}
+          <CsvPresetForm
+            busy={busy}
+            draft={csvPresetDraft}
+            onDelete={handleDeleteCsvPreset}
+            onDraftChange={setCsvPresetDraft}
+            onEdit={(preset) => setCsvPresetDraft(presetToDraft(preset))}
+            onSubmit={handleCsvPresetSubmit}
+            presets={csvPresets}
+          />
           {uploadPreview && (
             <ImportPreview
               categoryOptions={categoryOptions}
@@ -1452,6 +1522,134 @@ function ImportPreview({ categoryOptions, onCategoryChange, preview }) {
   );
 }
 
+function CsvPresetForm({ busy, draft, onDelete, onDraftChange, onEdit, onSubmit, presets }) {
+  return (
+    <div className="csv-preset-panel" data-testid="csv-preset-panel">
+      <form className="csv-preset-form" onSubmit={onSubmit}>
+        <input
+          aria-label="Preset name"
+          disabled={busy}
+          maxLength={80}
+          onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
+          placeholder="Preset name"
+          value={draft.name}
+        />
+        <input
+          aria-label="Date column"
+          disabled={busy}
+          maxLength={120}
+          onChange={(event) => onDraftChange({ ...draft, date_column: event.target.value })}
+          placeholder="Date column"
+          value={draft.date_column}
+        />
+        <input
+          aria-label="Description column"
+          disabled={busy}
+          maxLength={120}
+          onChange={(event) => onDraftChange({ ...draft, description_column: event.target.value })}
+          placeholder="Description column"
+          value={draft.description_column}
+        />
+        <input
+          aria-label="Amount column"
+          disabled={busy}
+          maxLength={120}
+          onChange={(event) => onDraftChange({ ...draft, amount_column: event.target.value })}
+          placeholder="Amount column"
+          value={draft.amount_column}
+        />
+        <input
+          aria-label="Debit column"
+          disabled={busy}
+          maxLength={120}
+          onChange={(event) => onDraftChange({ ...draft, debit_column: event.target.value })}
+          placeholder="Debit column"
+          value={draft.debit_column}
+        />
+        <input
+          aria-label="Credit column"
+          disabled={busy}
+          maxLength={120}
+          onChange={(event) => onDraftChange({ ...draft, credit_column: event.target.value })}
+          placeholder="Credit column"
+          value={draft.credit_column}
+        />
+        <input
+          aria-label="Type column"
+          disabled={busy}
+          maxLength={120}
+          onChange={(event) => onDraftChange({ ...draft, type_column: event.target.value })}
+          placeholder="Type column"
+          value={draft.type_column}
+        />
+        <input
+          aria-label="Category column"
+          disabled={busy}
+          maxLength={120}
+          onChange={(event) => onDraftChange({ ...draft, category_column: event.target.value })}
+          placeholder="Category column"
+          value={draft.category_column}
+        />
+        <input
+          aria-label="Account column"
+          disabled={busy}
+          maxLength={120}
+          onChange={(event) => onDraftChange({ ...draft, account_column: event.target.value })}
+          placeholder="Account column"
+          value={draft.account_column}
+        />
+        <button
+          disabled={
+            busy
+            || !draft.name.trim()
+            || !draft.date_column.trim()
+            || !draft.description_column.trim()
+            || (!draft.amount_column.trim() && !draft.debit_column.trim() && !draft.credit_column.trim())
+          }
+          type="submit"
+        >
+          <BookmarkPlus size={16} />
+          Save Mapping
+        </button>
+      </form>
+      {!!presets.length && (
+        <div className="list csv-preset-list" aria-label="Saved CSV mappings">
+          {presets.map((preset) => (
+            <div className="list-row csv-preset-row" key={preset.id}>
+              <div>
+                <strong>{preset.name}</strong>
+                <span>{csvPresetSummary(preset)}</span>
+              </div>
+              <div className="csv-preset-actions">
+                <button
+                  aria-label={`Edit CSV mapping ${preset.name}`}
+                  className="row-icon-button"
+                  disabled={busy}
+                  onClick={() => onEdit(preset)}
+                  title="Edit CSV mapping"
+                  type="button"
+                >
+                  <Pencil size={15} />
+                </button>
+                <button
+                  aria-label={`Delete CSV mapping ${preset.name}`}
+                  className="row-icon-button danger-row-button"
+                  disabled={busy}
+                  onClick={() => onDelete(preset)}
+                  title="Delete CSV mapping"
+                  type="button"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RuleList({ rules, busy, onDelete }) {
   if (!rules.length) return <p className="empty">No saved merchant rules.</p>;
 
@@ -1816,6 +2014,12 @@ function appendAccountName(formData, value) {
   }
 }
 
+function appendCsvPresetId(formData, value) {
+  if (value) {
+    formData.append("csv_preset_id", value);
+  }
+}
+
 function emptyTransactionDraft() {
   return {
     date: "",
@@ -1832,6 +2036,50 @@ function emptyRuleDraft() {
     category: "",
     apply_existing: false,
   };
+}
+
+function emptyCsvPresetDraft() {
+  return {
+    name: "",
+    date_column: "",
+    description_column: "",
+    amount_column: "",
+    debit_column: "",
+    credit_column: "",
+    type_column: "",
+    category_column: "",
+    account_column: "",
+  };
+}
+
+function presetToDraft(preset) {
+  return {
+    name: preset.name || "",
+    date_column: preset.date_column || "",
+    description_column: preset.description_column || "",
+    amount_column: preset.amount_column || "",
+    debit_column: preset.debit_column || "",
+    credit_column: preset.credit_column || "",
+    type_column: preset.type_column || "",
+    category_column: preset.category_column || "",
+    account_column: preset.account_column || "",
+  };
+}
+
+function csvPresetPayload(draft) {
+  return Object.fromEntries(
+    Object.entries(draft).map(([key, value]) => {
+      const normalized = value.trim();
+      return [key, normalized || null];
+    }),
+  );
+}
+
+function csvPresetSummary(preset) {
+  const moneyColumns = [preset.amount_column, preset.debit_column, preset.credit_column]
+    .filter(Boolean)
+    .join(" / ");
+  return `${preset.date_column} | ${preset.description_column} | ${moneyColumns}`;
 }
 
 function newTransactionDraft(activeMonth, categoryOptions, accountName) {

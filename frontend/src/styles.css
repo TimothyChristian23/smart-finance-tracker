@@ -112,11 +112,13 @@ h2 {
 .category-select,
 .budget-form select,
 .budget-form input,
-.transaction-edit-form select,
-.transaction-edit-form input,
-.transaction-toolbar select,
-.upload-form input,
-.ask-form textarea {
+  .transaction-edit-form select,
+  .transaction-edit-form input,
+  .transaction-toolbar select,
+  .upload-form input,
+  .upload-form select,
+  .csv-preset-form input,
+  .ask-form textarea {
   border: 1px solid var(--line);
   background: #fff;
   color: var(--text);
@@ -135,9 +137,11 @@ h2 {
 .budget-form input:focus,
 .transaction-edit-form select:focus,
 .transaction-edit-form input:focus,
-.transaction-toolbar select:focus,
-.upload-form input:focus,
-.ask-form textarea:focus {
+  .transaction-toolbar select:focus,
+  .upload-form input:focus,
+  .upload-form select:focus,
+  .csv-preset-form input:focus,
+  .ask-form textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(36, 120, 106, 0.16);
 }
@@ -276,6 +280,7 @@ h2 {
 }
 
 .upload-form,
+.csv-preset-form,
 .budget-form,
 .rule-form,
 .ask-form,
@@ -304,13 +309,15 @@ h2 {
   margin-bottom: 12px;
 }
 
-.upload-form input {
+.upload-form input,
+.upload-form select {
   min-height: 42px;
   padding: 8px;
 }
 
 .budget-form select,
 .budget-form input,
+.csv-preset-form input,
 .rule-form > input,
 .rule-form select,
 .privacy-form input {
@@ -350,6 +357,7 @@ h2 {
 }
 
 .upload-form button,
+.csv-preset-form button,
 .budget-form button,
 .rule-form button,
 .ask-form button,
@@ -365,6 +373,7 @@ h2 {
 }
 
 .upload-form button,
+.csv-preset-form button,
 .budget-form button,
 .rule-form button,
 .ask-form button,
@@ -378,6 +387,37 @@ h2 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 10px;
+}
+
+.csv-preset-panel {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.csv-preset-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.csv-preset-form button {
+  grid-column: 1 / -1;
+}
+
+.csv-preset-list {
+  gap: 7px;
+}
+
+.csv-preset-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.csv-preset-actions {
+  display: flex;
+  gap: 7px;
 }
 
 .ghost-button {
@@ -1413,8 +1453,17 @@ h2 {
   }
 
   .budget-form,
+  .csv-preset-form,
   .rule-form {
     grid-template-columns: 1fr;
+  }
+
+  .csv-preset-row {
+    grid-template-columns: 1fr;
+  }
+
+  .csv-preset-actions {
+    justify-content: space-between;
   }
 
   .privacy-form {

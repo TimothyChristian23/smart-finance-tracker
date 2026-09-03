@@ -12,6 +12,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Reviewed import flow with editable preview categories before saving
 - Manual transaction entry for cash purchases or one-off corrections
 - Flexible CSV parsing for common bank column names and debit/credit formats
+- Saved CSV mapping presets for bank-specific statement headers
 - Merchant cleanup for noisy bank descriptors and payment reference codes
 - Optional account labels for statement imports and transaction filtering
 - Account-level spending, income, and net summaries
@@ -28,7 +29,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Budget recommendations from recent history and recurring charges
 - Recurring charge and subscription detection with hide/restore controls
 - Transaction search, category filtering, and CSV export
-- Full local JSON backup export for transactions, uploads, budgets, merchant rules, recurring ignore preferences, and anomaly dismissals
+- Full local JSON backup export for transactions, uploads, budgets, merchant rules, CSV mapping presets, recurring ignore preferences, and anomaly dismissals
 - Guarded JSON backup restore for moving or recovering local development data
 - Guarded local data reset with typed confirmation
 - Monthly spending summaries
@@ -133,6 +134,7 @@ GET  /insights/monthly?month=2026-07
 GET  /forecast/monthly?month=2026-08
 GET  /months
 GET  /uploads
+GET  /csv-mapping-presets
 POST /transactions
 POST /transactions/preview
 POST /transactions/import-reviewed
@@ -158,6 +160,7 @@ GET  /anomalies?month=2026-07
 GET  /anomalies/ignored
 PUT  /budgets
 PUT  /merchant-rules
+PUT  /csv-mapping-presets
 POST /recurring/ignored
 POST /anomalies/{id}/ignore
 PATCH /transactions/{id}/category
@@ -165,6 +168,7 @@ PATCH /transactions/{id}
 DELETE /transactions/{id}
 DELETE /budgets/{id}
 DELETE /merchant-rules/{id}
+DELETE /csv-mapping-presets/{id}
 DELETE /recurring/ignored/{id}
 DELETE /anomalies/ignored/{id}
 DELETE /data?confirmation=RESET
@@ -191,6 +195,10 @@ CSV imports accept common bank-style headers such as `Date`, `Posting Date`,
 are stored as expenses even when the export already includes a minus sign or
 parentheses, and unsigned amount columns can use a `Type` column for debit/credit
 direction.
+For banks with unusual headers, save a CSV mapping preset from the dashboard or
+`PUT /csv-mapping-presets`, then choose it during preview or direct import. A
+preset can map date, description, signed amount or debit/credit columns, optional
+type, category, and account columns.
 Imported statement descriptors are cleaned into stable merchant names before
 categorization, duplicate checks, recurring-charge detection, merchant summaries,
 and saved merchant rules run.

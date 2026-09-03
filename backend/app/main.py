@@ -32,11 +32,13 @@ from app.database import (
     create_transaction,
     delete_anomaly_ignore,
     delete_budget,
+    delete_csv_import_preset,
     delete_merchant_rule,
     delete_recurring_ignore,
     delete_transaction,
     detect_anomalies,
     export_backup,
+    get_csv_import_preset,
     get_transaction,
     ignore_recurring_merchant,
     insert_transactions,
@@ -45,6 +47,7 @@ from app.database import (
     list_accounts,
     list_anomaly_ignores,
     list_ask_history,
+    list_csv_import_presets,
     list_merchant_rules,
     list_recurring_ignores,
     list_transactions,
@@ -61,6 +64,7 @@ from app.database import (
     recurring_charges,
     reset_all_data,
     reset_db,
+    save_csv_import_preset,
     save_merchant_rule,
     spending_for_categories,
     top_merchants,
@@ -168,6 +172,7 @@ class DataRestoreCounts(BaseModel):
     merchant_rules: int
     recurring_ignores: int
     anomaly_ignores: int
+    csv_import_presets: int
     budgets: int
     ask_history: int
 
@@ -185,6 +190,32 @@ class TransactionResponse(BaseModel):
     category: str
     source_file: str | None = None
     account_name: str | None = None
+
+
+class CsvImportPresetRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    date_column: str = Field(..., min_length=1, max_length=120)
+    description_column: str = Field(..., min_length=1, max_length=120)
+    amount_column: str | None = Field(None, max_length=120)
+    debit_column: str | None = Field(None, max_length=120)
+    credit_column: str | None = Field(None, max_length=120)
+    type_column: str | None = Field(None, max_length=120)
+    category_column: str | None = Field(None, max_length=120)
+    account_column: str | None = Field(None, max_length=120)
+
+
+class CsvImportPresetResponse(BaseModel):
+    id: int
+    name: str
+    date_column: str
+    description_column: str
+    amount_column: str | None = None
+    debit_column: str | None = None
+    credit_column: str | None = None
+    type_column: str | None = None
+    category_column: str | None = None
+    account_column: str | None = None
+    updated_at: str
 
 
 class CategoryReviewResponse(BaseModel):
@@ -470,6 +501,16 @@ CREDIT_COLUMNS = [
 TYPE_COLUMNS = ["type", "transaction type", "debit/credit", "credit/debit"]
 DEBIT_TYPES = ["debit", "withdrawal", "purchase", "charge", "payment", "pos", "check"]
 CREDIT_TYPES = ["credit", "deposit", "payroll", "refund", "interest", "income"]
+CSV_MAPPING_FIELDS = [
+    "date_column",
+    "description_column",
+    "amount_column",
+    "debit_column",
+    "credit_column",
+    "type_column",
+    "category_column",
+    "account_column",
+]
 
 
 @app.get("/health")
@@ -481,10 +522,12 @@ async def health() -> dict:
 async def upload_transactions(
     file: UploadFile = File(...),
     account_name: str | None = Form(None),
+    csv_preset_id: int | None = Form(None),
 ) -> UploadResponse:
     """Upload a CSV or text-based PDF bank statement and import transactions."""
     account_label = validate_account_name(account_name)
-    filename, file_type, rows = await parse_uploaded_statement(file)
+    csv_mapping = resolve_csv_mapping_preset(csv_preset_id)
+    filename, file_type, rows = await parse_uploaded_statement(file, csv_mapping=csv_mapping)
     apply_account_label(rows, account_label)
 
     result = insert_transactions(rows)
@@ -502,10 +545,12 @@ async def preview_transactions(
     file: UploadFile = File(...),
     limit: int = 25,
     account_name: str | None = Form(None),
+    csv_preset_id: int | None = Form(None),
 ) -> dict:
     """Preview parsed statement rows and duplicate estimates without importing."""
     account_label = validate_account_name(account_name)
-    filename, file_type, rows, errors = await preview_uploaded_statement(file)
+    csv_mapping = resolve_csv_mapping_preset(csv_preset_id)
+    filename, file_type, rows, errors = await preview_uploaded_statement(file, csv_mapping=csv_mapping)
     apply_account_label(rows, account_label)
     preview = preview_import(rows, sample_limit=bounded_limit(limit, maximum=5000))
     preview["errors"] = errors
@@ -641,6 +686,24 @@ async def accounts_summary(month: str | None = None) -> list[dict]:
 @app.get("/uploads", response_model=list[UploadHistoryResponse])
 async def uploads(limit: int = 20) -> list[dict]:
     return list_uploads(limit=bounded_limit(limit, maximum=100))
+
+
+@app.get("/csv-mapping-presets", response_model=list[CsvImportPresetResponse])
+async def csv_mapping_presets() -> list[dict]:
+    return list_csv_import_presets()
+
+
+@app.put("/csv-mapping-presets", response_model=CsvImportPresetResponse)
+async def upsert_csv_mapping_preset(request: CsvImportPresetRequest) -> dict:
+    preset = validate_csv_import_preset(request)
+    return save_csv_import_preset(**preset)
+
+
+@app.delete("/csv-mapping-presets/{preset_id}")
+async def remove_csv_mapping_preset(preset_id: int) -> dict:
+    if not delete_csv_import_preset(preset_id):
+        raise HTTPException(status_code=404, detail="CSV mapping preset not found.")
+    return {"message": "CSV mapping preset deleted."}
 
 
 @app.patch("/transactions/{transaction_id}/category", response_model=TransactionResponse)
@@ -1212,13 +1275,20 @@ async def clear_all_data(confirmation: str | None = None) -> dict:
     return {"message": "All local finance data cleared."}
 
 
-async def parse_uploaded_statement(file: UploadFile) -> tuple[str, str, list[dict]]:
+async def parse_uploaded_statement(
+    file: UploadFile,
+    csv_mapping: dict[str, str] | None = None,
+) -> tuple[str, str, list[dict]]:
     filename = Path(file.filename or "transactions.csv").name
     suffix = Path(filename).suffix.lower()
     content = await file.read()
     if suffix == ".csv":
         try:
-            return filename, "csv", parse_transactions_csv(content.decode("utf-8-sig"), filename)
+            return filename, "csv", parse_transactions_csv(
+                content.decode("utf-8-sig"),
+                filename,
+                column_mapping=csv_mapping,
+            )
         except UnicodeDecodeError as exc:
             raise HTTPException(status_code=400, detail="CSV file must be UTF-8 text.") from exc
     if suffix == ".pdf":
@@ -1226,13 +1296,20 @@ async def parse_uploaded_statement(file: UploadFile) -> tuple[str, str, list[dic
     raise HTTPException(status_code=400, detail="Only CSV or text-based PDF uploads are supported.")
 
 
-async def preview_uploaded_statement(file: UploadFile) -> tuple[str, str, list[dict], list[str]]:
+async def preview_uploaded_statement(
+    file: UploadFile,
+    csv_mapping: dict[str, str] | None = None,
+) -> tuple[str, str, list[dict], list[str]]:
     filename = Path(file.filename or "transactions.csv").name
     suffix = Path(filename).suffix.lower()
     content = await file.read()
     if suffix == ".csv":
         try:
-            rows, errors = parse_transactions_csv_preview(content.decode("utf-8-sig"), filename)
+            rows, errors = parse_transactions_csv_preview(
+                content.decode("utf-8-sig"),
+                filename,
+                column_mapping=csv_mapping,
+            )
         except UnicodeDecodeError as exc:
             raise HTTPException(status_code=400, detail="CSV file must be UTF-8 text.") from exc
         return filename, "csv", rows, errors
@@ -1241,18 +1318,41 @@ async def preview_uploaded_statement(file: UploadFile) -> tuple[str, str, list[d
     raise HTTPException(status_code=400, detail="Only CSV or text-based PDF uploads are supported.")
 
 
-def parse_transactions_csv(content: str, source_file: str) -> list[dict]:
+def parse_transactions_csv(
+    content: str,
+    source_file: str,
+    column_mapping: dict[str, str] | None = None,
+) -> list[dict]:
     """Parse common CSV statement columns into normalized transaction rows."""
-    rows, _errors = parse_transactions_csv_rows(content, source_file, collect_errors=False)
+    rows, _errors = parse_transactions_csv_rows(
+        content,
+        source_file,
+        collect_errors=False,
+        column_mapping=column_mapping,
+    )
     return rows
 
 
-def parse_transactions_csv_preview(content: str, source_file: str) -> tuple[list[dict], list[str]]:
+def parse_transactions_csv_preview(
+    content: str,
+    source_file: str,
+    column_mapping: dict[str, str] | None = None,
+) -> tuple[list[dict], list[str]]:
     """Parse CSV rows for preview and collect row-level errors."""
-    return parse_transactions_csv_rows(content, source_file, collect_errors=True)
+    return parse_transactions_csv_rows(
+        content,
+        source_file,
+        collect_errors=True,
+        column_mapping=column_mapping,
+    )
 
 
-def parse_transactions_csv_rows(content: str, source_file: str, collect_errors: bool = False) -> tuple[list[dict], list[str]]:
+def parse_transactions_csv_rows(
+    content: str,
+    source_file: str,
+    collect_errors: bool = False,
+    column_mapping: dict[str, str] | None = None,
+) -> tuple[list[dict], list[str]]:
     """Parse CSV statement rows with optional row-level error collection."""
     reader = csv.DictReader(StringIO(content))
     if not reader.fieldnames:
@@ -1261,15 +1361,24 @@ def parse_transactions_csv_rows(content: str, source_file: str, collect_errors: 
             return [], [message]
         raise HTTPException(status_code=400, detail=message)
 
+    mapping = normalize_csv_mapping(column_mapping)
+    header_error = validate_csv_mapping_headers(reader.fieldnames, mapping)
+    if header_error:
+        if collect_errors:
+            return [], [header_error]
+        raise HTTPException(status_code=400, detail=header_error)
+
     rows = []
     errors = []
     for row_number, raw_row in enumerate(reader, start=2):
         if row_is_blank(raw_row):
             continue
         try:
-            parsed_date = parse_date(get_column(raw_row, DATE_COLUMNS))
-            description = clean_merchant_description(get_column(raw_row, DESCRIPTION_COLUMNS))
-            amount_cents = parse_amount(raw_row)
+            parsed_date = parse_date(get_column(raw_row, DATE_COLUMNS, mapped_column=mapping.get("date_column")))
+            description = clean_merchant_description(
+                get_column(raw_row, DESCRIPTION_COLUMNS, mapped_column=mapping.get("description_column"))
+            )
+            amount_cents = parse_amount(raw_row, mapping)
         except ValueError as exc:
             message = f"Row {row_number}: {exc}"
             if collect_errors:
@@ -1277,8 +1386,18 @@ def parse_transactions_csv_rows(content: str, source_file: str, collect_errors: 
                 continue
             raise HTTPException(status_code=400, detail=message) from exc
 
-        category = get_column(raw_row, CATEGORY_COLUMNS, required=False)
-        account_name = normalize_csv_account_name(get_column(raw_row, ACCOUNT_COLUMNS, required=False))
+        category = get_column(
+            raw_row,
+            CATEGORY_COLUMNS,
+            required=False,
+            mapped_column=mapping.get("category_column"),
+        )
+        account_name = normalize_csv_account_name(get_column(
+            raw_row,
+            ACCOUNT_COLUMNS,
+            required=False,
+            mapped_column=mapping.get("account_column"),
+        ))
         rows.append({
             "date": parsed_date,
             "description": description,
@@ -1299,6 +1418,30 @@ def parse_transactions_csv_rows(content: str, source_file: str, collect_errors: 
 
 def row_is_blank(raw_row: dict) -> bool:
     return not any(str(value).strip() for value in raw_row.values() if value is not None)
+
+
+def normalize_csv_mapping(column_mapping: dict[str, str] | None) -> dict[str, str]:
+    if not column_mapping:
+        return {}
+    return {
+        key: " ".join(value.split())
+        for key, value in column_mapping.items()
+        if isinstance(value, str) and value.strip()
+    }
+
+
+def validate_csv_mapping_headers(fieldnames: list[str], column_mapping: dict[str, str]) -> str | None:
+    if not column_mapping:
+        return None
+    headers = {
+        normalize_header(fieldname)
+        for fieldname in fieldnames
+        if fieldname
+    }
+    for column_name in column_mapping.values():
+        if normalize_header(column_name) not in headers:
+            return f"CSV is missing mapped column: {column_name}"
+    return None
 
 
 def parse_transactions_pdf(content: bytes, source_file: str) -> list[dict]:
@@ -1378,8 +1521,21 @@ def parse_statement_text_line(line: str, has_balance_column: bool = False) -> di
     }
 
 
-def get_column(raw_row: dict, candidates: list[str], required: bool = True) -> str:
+def get_column(
+    raw_row: dict,
+    candidates: list[str],
+    required: bool = True,
+    mapped_column: str | None = None,
+) -> str:
     normalized = {normalize_header(key): value for key, value in raw_row.items() if key}
+    if mapped_column:
+        value = normalized.get(normalize_header(mapped_column))
+        if value and value.strip():
+            return value.strip()
+        if required:
+            raise ValueError(f"missing required column: {mapped_column}")
+        return ""
+
     for candidate in candidates:
         value = normalized.get(normalize_header(candidate))
         if value and value.strip():
@@ -1404,23 +1560,104 @@ def parse_date(value: str) -> str:
     raise ValueError(f"invalid date '{value}'")
 
 
-def parse_amount(raw_row: dict) -> int:
-    debit = get_column(raw_row, DEBIT_COLUMNS, required=False)
-    credit = get_column(raw_row, CREDIT_COLUMNS, required=False)
+def parse_amount(raw_row: dict, column_mapping: dict[str, str] | None = None) -> int:
+    mapping = column_mapping or {}
+    debit = get_column(
+        raw_row,
+        DEBIT_COLUMNS,
+        required=False,
+        mapped_column=mapping.get("debit_column"),
+    )
+    credit = get_column(
+        raw_row,
+        CREDIT_COLUMNS,
+        required=False,
+        mapped_column=mapping.get("credit_column"),
+    )
     if debit or credit:
         if debit:
             return -abs(money_to_cents(debit))
         return abs(money_to_cents(credit))
 
-    amount = get_column(raw_row, AMOUNT_COLUMNS)
+    amount = get_column(raw_row, AMOUNT_COLUMNS, mapped_column=mapping.get("amount_column"))
     amount_cents = money_to_cents(amount)
-    transaction_type = get_column(raw_row, TYPE_COLUMNS, required=False).lower()
+    transaction_type = get_column(
+        raw_row,
+        TYPE_COLUMNS,
+        required=False,
+        mapped_column=mapping.get("type_column"),
+    ).lower()
     if transaction_type:
         if has_any(transaction_type, DEBIT_TYPES):
             return -abs(amount_cents)
         if has_any(transaction_type, CREDIT_TYPES):
             return abs(amount_cents)
     return amount_cents
+
+
+def resolve_csv_mapping_preset(preset_id: int | None) -> dict[str, str] | None:
+    if preset_id is None:
+        return None
+    preset = get_csv_import_preset(preset_id)
+    if preset is None:
+        raise HTTPException(status_code=404, detail="CSV mapping preset not found.")
+    return {
+        field: preset[field]
+        for field in CSV_MAPPING_FIELDS
+        if preset.get(field)
+    }
+
+
+def validate_csv_import_preset(request: CsvImportPresetRequest) -> dict:
+    preset = {
+        "name": normalize_required_text(request.name, "name", max_length=80),
+        "date_column": normalize_required_text(request.date_column, "date_column", max_length=120),
+        "description_column": normalize_required_text(
+            request.description_column,
+            "description_column",
+            max_length=120,
+        ),
+        "amount_column": normalize_optional_text(request.amount_column, "amount_column", max_length=120),
+        "debit_column": normalize_optional_text(request.debit_column, "debit_column", max_length=120),
+        "credit_column": normalize_optional_text(request.credit_column, "credit_column", max_length=120),
+        "type_column": normalize_optional_text(request.type_column, "type_column", max_length=120),
+        "category_column": normalize_optional_text(request.category_column, "category_column", max_length=120),
+        "account_column": normalize_optional_text(request.account_column, "account_column", max_length=120),
+    }
+    if not any(preset[field] for field in ("amount_column", "debit_column", "credit_column")):
+        raise HTTPException(
+            status_code=400,
+            detail="CSV mapping must include an amount, debit, or credit column.",
+        )
+
+    mapped_columns = [
+        normalize_header(preset[field])
+        for field in CSV_MAPPING_FIELDS
+        if preset.get(field)
+    ]
+    if len(set(mapped_columns)) != len(mapped_columns):
+        raise HTTPException(status_code=400, detail="CSV mapped columns must be unique.")
+    return preset
+
+
+def normalize_required_text(value: str, field_name: str, max_length: int) -> str:
+    normalized = " ".join(value.split())
+    if not normalized:
+        raise HTTPException(status_code=400, detail=f"{field_name} cannot be empty.")
+    if len(normalized) > max_length:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be {max_length} characters or fewer.")
+    return normalized
+
+
+def normalize_optional_text(value: str | None, field_name: str, max_length: int) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.split())
+    if not normalized:
+        return None
+    if len(normalized) > max_length:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be {max_length} characters or fewer.")
+    return normalized
 
 
 def money_to_cents(value: str) -> int:

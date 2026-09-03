@@ -153,6 +153,24 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS csv_import_presets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            date_column TEXT NOT NULL,
+            description_column TEXT NOT NULL,
+            amount_column TEXT,
+            debit_column TEXT,
+            credit_column TEXT,
+            type_column TEXT,
+            category_column TEXT,
+            account_column TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS budgets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             month TEXT NOT NULL,
@@ -242,6 +260,7 @@ def reset_all_data() -> None:
         conn.execute("DELETE FROM merchant_rules")
         conn.execute("DELETE FROM recurring_ignores")
         conn.execute("DELETE FROM anomaly_ignores")
+        conn.execute("DELETE FROM csv_import_presets")
         conn.execute("DELETE FROM budgets")
         conn.execute("DELETE FROM ask_history")
         conn.commit()
@@ -848,6 +867,142 @@ def delete_anomaly_ignore(ignore_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+def list_csv_import_presets() -> list[dict]:
+    """Return saved CSV column mapping presets."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                date_column,
+                description_column,
+                amount_column,
+                debit_column,
+                credit_column,
+                type_column,
+                category_column,
+                account_column,
+                updated_at
+            FROM csv_import_presets
+            ORDER BY name
+            """
+        ).fetchall()
+    return [_csv_import_preset_row_to_dict(row) for row in rows]
+
+
+def get_csv_import_preset(preset_id: int) -> dict | None:
+    """Return one saved CSV mapping preset."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                date_column,
+                description_column,
+                amount_column,
+                debit_column,
+                credit_column,
+                type_column,
+                category_column,
+                account_column,
+                updated_at
+            FROM csv_import_presets
+            WHERE id = ?
+            """,
+            (preset_id,),
+        ).fetchone()
+    return _csv_import_preset_row_to_dict(row) if row else None
+
+
+def save_csv_import_preset(
+    name: str,
+    date_column: str,
+    description_column: str,
+    amount_column: str | None = None,
+    debit_column: str | None = None,
+    credit_column: str | None = None,
+    type_column: str | None = None,
+    category_column: str | None = None,
+    account_column: str | None = None,
+) -> dict:
+    """Create or update a CSV column mapping preset by name."""
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO csv_import_presets (
+                name,
+                date_column,
+                description_column,
+                amount_column,
+                debit_column,
+                credit_column,
+                type_column,
+                category_column,
+                account_column
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                date_column = excluded.date_column,
+                description_column = excluded.description_column,
+                amount_column = excluded.amount_column,
+                debit_column = excluded.debit_column,
+                credit_column = excluded.credit_column,
+                type_column = excluded.type_column,
+                category_column = excluded.category_column,
+                account_column = excluded.account_column,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                name,
+                date_column,
+                description_column,
+                amount_column,
+                debit_column,
+                credit_column,
+                type_column,
+                category_column,
+                account_column,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                date_column,
+                description_column,
+                amount_column,
+                debit_column,
+                credit_column,
+                type_column,
+                category_column,
+                account_column,
+                updated_at
+            FROM csv_import_presets
+            WHERE name = ?
+            """,
+            (name,),
+        ).fetchone()
+    return _csv_import_preset_row_to_dict(row)
+
+
+def delete_csv_import_preset(preset_id: int) -> bool:
+    """Delete a saved CSV column mapping preset."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM csv_import_presets
+            WHERE id = ?
+            """,
+            (preset_id,),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+
 def budget_progress(month: str) -> list[dict]:
     """Return monthly budget targets with live spending progress."""
     where_sql, params = _month_filter(month)
@@ -1088,6 +1243,7 @@ def export_backup() -> dict:
     merchant_rules = list_merchant_rules()
     recurring_ignores = list_recurring_ignores()
     anomaly_ignores = list_anomaly_ignores()
+    csv_import_presets = list_csv_import_presets()
     budgets = list_all_budgets()
     ask_history = list_ask_history(limit=100000)
     months = available_months()
@@ -1102,6 +1258,7 @@ def export_backup() -> dict:
             "merchant_rules": len(merchant_rules),
             "recurring_ignores": len(recurring_ignores),
             "anomaly_ignores": len(anomaly_ignores),
+            "csv_import_presets": len(csv_import_presets),
             "budgets": len(budgets),
             "ask_history": len(ask_history),
             "months": len(months),
@@ -1113,6 +1270,7 @@ def export_backup() -> dict:
         "merchant_rules": merchant_rules,
         "recurring_ignores": recurring_ignores,
         "anomaly_ignores": anomaly_ignores,
+        "csv_import_presets": csv_import_presets,
         "ask_history": ask_history,
         "uploads": uploads,
     }
@@ -1130,6 +1288,7 @@ def restore_backup(backup: dict) -> dict:
     merchant_rules = _restore_merchant_rules(backup)
     recurring_ignores = _restore_recurring_ignores(backup)
     anomaly_ignores = _restore_anomaly_ignores(backup)
+    csv_import_presets = _restore_csv_import_presets(backup)
     budgets = _restore_budgets(backup)
     ask_history = _restore_ask_history(backup)
     if len({row[0] for row in merchant_rules}) != len(merchant_rules):
@@ -1138,6 +1297,8 @@ def restore_backup(backup: dict) -> dict:
         raise ValueError("Backup contains duplicate recurring ignores.")
     if len({row[0] for row in anomaly_ignores}) != len(anomaly_ignores):
         raise ValueError("Backup contains duplicate anomaly ignores.")
+    if len({row[0].casefold() for row in csv_import_presets}) != len(csv_import_presets):
+        raise ValueError("Backup contains duplicate CSV import presets.")
     if len({(row[0], row[1]) for row in budgets}) != len(budgets):
         raise ValueError("Backup contains duplicate budgets.")
 
@@ -1147,6 +1308,7 @@ def restore_backup(backup: dict) -> dict:
         conn.execute("DELETE FROM merchant_rules")
         conn.execute("DELETE FROM recurring_ignores")
         conn.execute("DELETE FROM anomaly_ignores")
+        conn.execute("DELETE FROM csv_import_presets")
         conn.execute("DELETE FROM budgets")
         conn.execute("DELETE FROM ask_history")
         conn.executemany(
@@ -1222,6 +1384,24 @@ def restore_backup(backup: dict) -> dict:
         )
         conn.executemany(
             """
+            INSERT INTO csv_import_presets (
+                name,
+                date_column,
+                description_column,
+                amount_column,
+                debit_column,
+                credit_column,
+                type_column,
+                category_column,
+                account_column,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            csv_import_presets,
+        )
+        conn.executemany(
+            """
             INSERT INTO budgets (
                 month,
                 category,
@@ -1255,6 +1435,7 @@ def restore_backup(backup: dict) -> dict:
         "merchant_rules": len(merchant_rules),
         "recurring_ignores": len(recurring_ignores),
         "anomaly_ignores": len(anomaly_ignores),
+        "csv_import_presets": len(csv_import_presets),
         "budgets": len(budgets),
         "ask_history": len(ask_history),
     }
@@ -2126,6 +2307,22 @@ def _anomaly_ignore_row_to_dict(row: sqlite3.Row) -> dict:
     }
 
 
+def _csv_import_preset_row_to_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "date_column": row["date_column"],
+        "description_column": row["description_column"],
+        "amount_column": row["amount_column"],
+        "debit_column": row["debit_column"],
+        "credit_column": row["credit_column"],
+        "type_column": row["type_column"],
+        "category_column": row["category_column"],
+        "account_column": row["account_column"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def _ignored_anomaly_keys(conn: sqlite3.Connection) -> set[str]:
     return {
         row["transaction_key"]
@@ -2311,6 +2508,25 @@ def _restore_anomaly_ignores(backup: dict) -> list[tuple]:
             source_file,
             account_name,
             _backup_optional_text(record, "created_at", max_length=80),
+        ))
+    return rows
+
+
+def _restore_csv_import_presets(backup: dict) -> list[tuple]:
+    rows = []
+    for index, item in enumerate(_backup_list(backup, "csv_import_presets"), start=1):
+        record = _backup_object(item, f"csv_import_presets[{index}]")
+        rows.append((
+            _backup_required_text(record, "name", f"csv_import_presets[{index}]", max_length=80),
+            _backup_required_text(record, "date_column", f"csv_import_presets[{index}]", max_length=120),
+            _backup_required_text(record, "description_column", f"csv_import_presets[{index}]", max_length=120),
+            _backup_optional_text(record, "amount_column", max_length=120),
+            _backup_optional_text(record, "debit_column", max_length=120),
+            _backup_optional_text(record, "credit_column", max_length=120),
+            _backup_optional_text(record, "type_column", max_length=120),
+            _backup_optional_text(record, "category_column", max_length=120),
+            _backup_optional_text(record, "account_column", max_length=120),
+            _backup_optional_text(record, "updated_at", max_length=80),
         ))
     return rows
 

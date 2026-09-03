@@ -41,11 +41,33 @@ MESSY_MERCHANT_CSV = """date,description,amount
 2026-08-04,ACH CREDIT PAYROLL DEPOSIT ID 928372,3200.00
 """
 
+CUSTOM_MAPPING_CSV = """Posted,Payee,Outflow,Inflow,Bucket,Wallet
+10/01/2026,Farmers Market,42.37,,Food & Grocery,Travel Checking
+10/02/2026,Payroll Deposit,,3200.00,Income,Travel Checking
+"""
+
 
 @pytest.fixture(autouse=True)
 def isolated_db(monkeypatch, tmp_path):
     monkeypatch.setenv("FINANCE_DB_PATH", str(tmp_path / "finance.sqlite3"))
     reset_db()
+
+
+def save_custom_csv_preset() -> dict:
+    response = client.put(
+        "/csv-mapping-presets",
+        json={
+            "name": "Travel Checking",
+            "date_column": "Posted",
+            "description_column": "Payee",
+            "debit_column": "Outflow",
+            "credit_column": "Inflow",
+            "category_column": "Bucket",
+            "account_column": "Wallet",
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
 
 
 def test_health():
@@ -684,6 +706,7 @@ def test_data_export_backup_includes_local_finance_records():
         json={"month": "2026-07", "category": "Dining", "amount": 200},
     )
     client.post("/recurring/ignored", json={"merchant": "Netflix Subscription"})
+    save_custom_csv_preset()
     anomaly = next(
         item for item in client.get("/anomalies?month=2026-07").json()
         if item["description"] == "One-Time Electronics Store"
@@ -703,6 +726,7 @@ def test_data_export_backup_includes_local_finance_records():
         "merchant_rules": 1,
         "recurring_ignores": 1,
         "anomaly_ignores": 1,
+        "csv_import_presets": 1,
         "budgets": 1,
         "ask_history": 0,
         "months": 1,
@@ -713,6 +737,7 @@ def test_data_export_backup_includes_local_finance_records():
     assert payload["merchant_rules"][0]["merchant"] == "Trader Joes"
     assert payload["recurring_ignores"][0]["merchant"] == "Netflix Subscription"
     assert payload["anomaly_ignores"][0]["transaction"]["description"] == "One-Time Electronics Store"
+    assert payload["csv_import_presets"][0]["name"] == "Travel Checking"
     assert payload["budgets"][0]["category"] == "Dining"
     assert any(
         item["description"] == "Trader Joes" and item["category"] == "Dining"
@@ -736,6 +761,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
     )
     client.put("/budgets", json={"month": "2026-07", "category": "Dining", "amount": 200})
     client.post("/recurring/ignored", json={"merchant": "Netflix Subscription"})
+    save_custom_csv_preset()
     anomaly = next(
         item for item in client.get("/anomalies?month=2026-07").json()
         if item["description"] == "One-Time Electronics Store"
@@ -762,6 +788,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
             "merchant_rules": 1,
             "recurring_ignores": 1,
             "anomaly_ignores": 1,
+            "csv_import_presets": 1,
             "budgets": 1,
             "ask_history": 1,
         },
@@ -774,6 +801,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
     assert client.get("/merchant-rules").json()[0]["merchant"] == "Trader Joes"
     assert client.get("/recurring/ignored").json()[0]["merchant"] == "Netflix Subscription"
     assert client.get("/anomalies/ignored").json()[0]["transaction"]["description"] == "One-Time Electronics Store"
+    assert client.get("/csv-mapping-presets").json()[0]["name"] == "Travel Checking"
     assert client.get("/budgets?month=2026-07").json()[0]["category"] == "Dining"
     assert client.get("/ask/history").json()[0]["question"] == "How much did I spend on food in 2026-07?"
     assert client.get("/accounts/summary?month=2026-07").json()[0]["account_name"] == "Chase Checking"
@@ -854,6 +882,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
         json={"month": "2026-07", "category": "Dining", "amount": 200},
     )
     client.post("/recurring/ignored", json={"merchant": "Netflix Subscription"})
+    save_custom_csv_preset()
     anomaly = next(
         item for item in client.get("/anomalies?month=2026-07").json()
         if item["description"] == "One-Time Electronics Store"
@@ -878,6 +907,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
         "merchant_rules": 0,
         "recurring_ignores": 0,
         "anomaly_ignores": 0,
+        "csv_import_presets": 0,
         "budgets": 0,
         "ask_history": 0,
         "months": 0,
@@ -887,6 +917,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
     assert client.get("/merchant-rules").json() == []
     assert client.get("/recurring/ignored").json() == []
     assert client.get("/anomalies/ignored").json() == []
+    assert client.get("/csv-mapping-presets").json() == []
     assert client.get("/budgets?month=2026-07").json() == []
     assert client.get("/ask/history").json() == []
 
@@ -1648,6 +1679,98 @@ def test_parse_transactions_csv_uses_type_for_unsigned_amounts():
     assert rows[0]["date"] == "2026-07-01"
     assert rows[0]["amount_cents"] == -6520
     assert rows[1]["amount_cents"] == 320000
+
+
+def test_csv_mapping_preset_drives_preview_and_upload_for_custom_headers():
+    preset = save_custom_csv_preset()
+    assert preset["name"] == "Travel Checking"
+    assert preset["debit_column"] == "Outflow"
+    assert client.get("/csv-mapping-presets").json()[0]["name"] == "Travel Checking"
+
+    preview = client.post(
+        "/transactions/preview",
+        data={"csv_preset_id": str(preset["id"])},
+        files={"file": ("custom.csv", CUSTOM_MAPPING_CSV, "text/csv")},
+    )
+
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    assert preview_payload["row_count"] == 2
+    assert preview_payload["rows"][0]["date"] == "2026-10-01"
+    assert preview_payload["rows"][0]["description"] == "Farmers Market"
+    assert preview_payload["rows"][0]["amount"] == -42.37
+    assert preview_payload["rows"][0]["category"] == "Food & Grocery"
+    assert preview_payload["rows"][0]["account_name"] == "Travel Checking"
+
+    upload = client.post(
+        "/transactions/upload",
+        data={"csv_preset_id": str(preset["id"])},
+        files={"file": ("custom.csv", CUSTOM_MAPPING_CSV, "text/csv")},
+    )
+
+    assert upload.status_code == 200
+    assert upload.json()["imported"] == 2
+    transactions = client.get("/transactions", params={"month": "2026-10", "limit": 10}).json()
+    assert [item["description"] for item in transactions] == ["Payroll Deposit", "Farmers Market"]
+    assert {item["account_name"] for item in transactions} == {"Travel Checking"}
+
+    delete_response = client.delete(f"/csv-mapping-presets/{preset['id']}")
+    assert delete_response.status_code == 200
+    assert client.get("/csv-mapping-presets").json() == []
+
+
+def test_csv_mapping_preset_validates_required_amount_and_duplicate_columns():
+    missing_amount = client.put(
+        "/csv-mapping-presets",
+        json={
+            "name": "Broken",
+            "date_column": "Posted",
+            "description_column": "Payee",
+        },
+    )
+    duplicate_columns = client.put(
+        "/csv-mapping-presets",
+        json={
+            "name": "Duplicate",
+            "date_column": "Posted",
+            "description_column": "Payee",
+            "amount_column": "Posted",
+        },
+    )
+
+    assert missing_amount.status_code == 400
+    assert missing_amount.json()["detail"] == "CSV mapping must include an amount, debit, or credit column."
+    assert duplicate_columns.status_code == 400
+    assert duplicate_columns.json()["detail"] == "CSV mapped columns must be unique."
+
+
+def test_csv_mapping_preset_missing_id_and_bad_header_are_reported():
+    missing_preset = client.post(
+        "/transactions/preview",
+        data={"csv_preset_id": "999999"},
+        files={"file": ("custom.csv", CUSTOM_MAPPING_CSV, "text/csv")},
+    )
+
+    preset = client.put(
+        "/csv-mapping-presets",
+        json={
+            "name": "Broken Headers",
+            "date_column": "Missing Date",
+            "description_column": "Payee",
+            "debit_column": "Outflow",
+        },
+    ).json()
+    bad_header = client.post(
+        "/transactions/preview",
+        data={"csv_preset_id": str(preset["id"])},
+        files={"file": ("custom.csv", CUSTOM_MAPPING_CSV, "text/csv")},
+    )
+
+    assert missing_preset.status_code == 404
+    assert missing_preset.json()["detail"] == "CSV mapping preset not found."
+    assert bad_header.status_code == 200
+    assert bad_header.json()["errors"] == ["CSV is missing mapped column: Missing Date"]
+    assert bad_header.json()["row_count"] == 0
 
 
 def test_money_to_cents_handles_parentheses():
