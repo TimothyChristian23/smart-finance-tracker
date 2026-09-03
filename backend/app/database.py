@@ -138,6 +138,21 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS anomaly_ignores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_key TEXT NOT NULL UNIQUE,
+            transaction_date TEXT NOT NULL,
+            description TEXT NOT NULL,
+            amount_cents INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            source_file TEXT,
+            account_name TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS budgets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             month TEXT NOT NULL,
@@ -226,6 +241,7 @@ def reset_all_data() -> None:
         conn.execute("DELETE FROM upload_history")
         conn.execute("DELETE FROM merchant_rules")
         conn.execute("DELETE FROM recurring_ignores")
+        conn.execute("DELETE FROM anomaly_ignores")
         conn.execute("DELETE FROM budgets")
         conn.execute("DELETE FROM ask_history")
         conn.commit()
@@ -730,6 +746,108 @@ def delete_recurring_ignore(ignore_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+def list_anomaly_ignores() -> list[dict]:
+    """Return anomaly transactions the user has dismissed."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                id,
+                transaction_key,
+                transaction_date,
+                description,
+                amount_cents,
+                category,
+                source_file,
+                account_name,
+                created_at
+            FROM anomaly_ignores
+            ORDER BY created_at DESC, id DESC
+            """
+        ).fetchall()
+    return [_anomaly_ignore_row_to_dict(row) for row in rows]
+
+
+def ignore_anomaly_transaction(transaction_id: int) -> dict | None:
+    """Dismiss one transaction from anomaly detection."""
+    with connect() as conn:
+        transaction = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        if transaction is None:
+            return None
+
+        transaction_key = anomaly_transaction_key_from_row(transaction)
+        conn.execute(
+            """
+            INSERT INTO anomaly_ignores (
+                transaction_key,
+                transaction_date,
+                description,
+                amount_cents,
+                category,
+                source_file,
+                account_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(transaction_key) DO UPDATE SET
+                transaction_date = excluded.transaction_date,
+                description = excluded.description,
+                amount_cents = excluded.amount_cents,
+                category = excluded.category,
+                source_file = excluded.source_file,
+                account_name = excluded.account_name
+            """,
+            (
+                transaction_key,
+                transaction["transaction_date"],
+                transaction["description"],
+                int(transaction["amount_cents"]),
+                transaction["category"],
+                transaction["source_file"],
+                transaction["account_name"],
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                transaction_key,
+                transaction_date,
+                description,
+                amount_cents,
+                category,
+                source_file,
+                account_name,
+                created_at
+            FROM anomaly_ignores
+            WHERE transaction_key = ?
+            """,
+            (transaction_key,),
+        ).fetchone()
+    return _anomaly_ignore_row_to_dict(row)
+
+
+def delete_anomaly_ignore(ignore_id: int) -> bool:
+    """Restore a dismissed anomaly by ignore id."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM anomaly_ignores
+            WHERE id = ?
+            """,
+            (ignore_id,),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+
 def budget_progress(month: str) -> list[dict]:
     """Return monthly budget targets with live spending progress."""
     where_sql, params = _month_filter(month)
@@ -969,6 +1087,7 @@ def export_backup() -> dict:
     uploads = list_uploads(limit=100000)
     merchant_rules = list_merchant_rules()
     recurring_ignores = list_recurring_ignores()
+    anomaly_ignores = list_anomaly_ignores()
     budgets = list_all_budgets()
     ask_history = list_ask_history(limit=100000)
     months = available_months()
@@ -982,6 +1101,7 @@ def export_backup() -> dict:
             "uploads": len(uploads),
             "merchant_rules": len(merchant_rules),
             "recurring_ignores": len(recurring_ignores),
+            "anomaly_ignores": len(anomaly_ignores),
             "budgets": len(budgets),
             "ask_history": len(ask_history),
             "months": len(months),
@@ -992,6 +1112,7 @@ def export_backup() -> dict:
         "budgets": budgets,
         "merchant_rules": merchant_rules,
         "recurring_ignores": recurring_ignores,
+        "anomaly_ignores": anomaly_ignores,
         "ask_history": ask_history,
         "uploads": uploads,
     }
@@ -1008,12 +1129,15 @@ def restore_backup(backup: dict) -> dict:
     uploads = _restore_uploads(backup)
     merchant_rules = _restore_merchant_rules(backup)
     recurring_ignores = _restore_recurring_ignores(backup)
+    anomaly_ignores = _restore_anomaly_ignores(backup)
     budgets = _restore_budgets(backup)
     ask_history = _restore_ask_history(backup)
     if len({row[0] for row in merchant_rules}) != len(merchant_rules):
         raise ValueError("Backup contains duplicate merchant rules.")
     if len({row[0] for row in recurring_ignores}) != len(recurring_ignores):
         raise ValueError("Backup contains duplicate recurring ignores.")
+    if len({row[0] for row in anomaly_ignores}) != len(anomaly_ignores):
+        raise ValueError("Backup contains duplicate anomaly ignores.")
     if len({(row[0], row[1]) for row in budgets}) != len(budgets):
         raise ValueError("Backup contains duplicate budgets.")
 
@@ -1022,6 +1146,7 @@ def restore_backup(backup: dict) -> dict:
         conn.execute("DELETE FROM upload_history")
         conn.execute("DELETE FROM merchant_rules")
         conn.execute("DELETE FROM recurring_ignores")
+        conn.execute("DELETE FROM anomaly_ignores")
         conn.execute("DELETE FROM budgets")
         conn.execute("DELETE FROM ask_history")
         conn.executemany(
@@ -1081,6 +1206,22 @@ def restore_backup(backup: dict) -> dict:
         )
         conn.executemany(
             """
+            INSERT INTO anomaly_ignores (
+                transaction_key,
+                transaction_date,
+                description,
+                amount_cents,
+                category,
+                source_file,
+                account_name,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            anomaly_ignores,
+        )
+        conn.executemany(
+            """
             INSERT INTO budgets (
                 month,
                 category,
@@ -1113,6 +1254,7 @@ def restore_backup(backup: dict) -> dict:
         "uploads": len(uploads),
         "merchant_rules": len(merchant_rules),
         "recurring_ignores": len(recurring_ignores),
+        "anomaly_ignores": len(anomaly_ignores),
         "budgets": len(budgets),
         "ask_history": len(ask_history),
     }
@@ -1887,21 +2029,54 @@ def detect_anomalies(limit: int = 10, month: str | None = None) -> list[dict]:
             ORDER BY ABS(t.amount_cents) DESC
             LIMIT ?
             """,
-            [*params, limit],
+            [*params, limit * 5],
         ).fetchall()
+        ignored_keys = _ignored_anomaly_keys(conn)
 
     anomalies = []
     for row in rows:
+        if anomaly_transaction_key_from_row(row) in ignored_keys:
+            continue
         transaction = _transaction_row_to_dict(row)
         transaction["average_category_spend"] = cents_to_dollars(row["avg_cents"])
         transaction["reason"] = "Expense is at least 80% higher than this category average."
         anomalies.append(transaction)
-    return anomalies
+    return anomalies[:limit]
 
 
 def cents_to_dollars(cents: int | float) -> float:
     """Convert cents to a rounded dollar amount."""
     return round(float(cents) / 100, 2)
+
+
+def anomaly_transaction_key(
+    transaction_date: str,
+    description: str,
+    amount_cents: int,
+    category: str,
+    source_file: str | None = None,
+    account_name: str | None = None,
+) -> str:
+    """Build a stable key for a transaction-level anomaly dismissal."""
+    return "|".join([
+        transaction_date,
+        merchant_key(description),
+        str(int(amount_cents)),
+        normalize_text(category),
+        normalize_text(source_file or ""),
+        normalize_text(account_name or ""),
+    ])
+
+
+def anomaly_transaction_key_from_row(row: sqlite3.Row) -> str:
+    return anomaly_transaction_key(
+        row["transaction_date"],
+        row["description"],
+        int(row["amount_cents"]),
+        row["category"],
+        row["source_file"],
+        row["account_name"],
+    )
 
 
 def _transaction_row_to_dict(row: sqlite3.Row) -> dict:
@@ -1932,6 +2107,29 @@ def _recurring_ignore_row_to_dict(row: sqlite3.Row) -> dict:
         "merchant": row["merchant_name"],
         "merchant_key": row["merchant_key"],
         "created_at": row["created_at"],
+    }
+
+
+def _anomaly_ignore_row_to_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "transaction_key": row["transaction_key"],
+        "transaction": {
+            "date": row["transaction_date"],
+            "description": row["description"],
+            "amount": cents_to_dollars(row["amount_cents"]),
+            "category": row["category"],
+            "source_file": row["source_file"],
+            "account_name": row["account_name"],
+        },
+        "created_at": row["created_at"],
+    }
+
+
+def _ignored_anomaly_keys(conn: sqlite3.Connection) -> set[str]:
+    return {
+        row["transaction_key"]
+        for row in conn.execute("SELECT transaction_key FROM anomaly_ignores").fetchall()
     }
 
 
@@ -2059,6 +2257,59 @@ def _restore_recurring_ignores(backup: dict) -> list[tuple]:
         rows.append((
             merchant_key_value,
             merchant_name,
+            _backup_optional_text(record, "created_at", max_length=80),
+        ))
+    return rows
+
+
+def _restore_anomaly_ignores(backup: dict) -> list[tuple]:
+    rows = []
+    for index, item in enumerate(_backup_list(backup, "anomaly_ignores"), start=1):
+        record = _backup_object(item, f"anomaly_ignores[{index}]")
+        transaction = _backup_object(
+            record.get("transaction"),
+            f"anomaly_ignores[{index}].transaction",
+        )
+        transaction_date = _backup_date(
+            transaction,
+            "date",
+            f"anomaly_ignores[{index}].transaction",
+        )
+        description = _backup_required_text(
+            transaction,
+            "description",
+            f"anomaly_ignores[{index}].transaction",
+            max_length=200,
+        )
+        amount_cents = _backup_amount_cents(
+            transaction,
+            "amount",
+            f"anomaly_ignores[{index}].transaction",
+        )
+        category = _backup_required_text(
+            transaction,
+            "category",
+            f"anomaly_ignores[{index}].transaction",
+            max_length=80,
+        )
+        source_file = _backup_optional_text(transaction, "source_file", max_length=200)
+        account_name = _backup_optional_text(transaction, "account_name", max_length=80)
+        transaction_key = _backup_optional_text(record, "transaction_key", max_length=600)
+        rows.append((
+            transaction_key or anomaly_transaction_key(
+                transaction_date,
+                description,
+                amount_cents,
+                category,
+                source_file,
+                account_name,
+            ),
+            transaction_date,
+            description,
+            amount_cents,
+            category,
+            source_file,
+            account_name,
             _backup_optional_text(record, "created_at", max_length=80),
         ))
     return rows

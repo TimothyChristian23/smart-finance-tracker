@@ -28,14 +28,14 @@ The first implementation slice focuses on trustworthy analytics:
 - Budget recommendations from recent history and recurring charges
 - Recurring charge and subscription detection with hide/restore controls
 - Transaction search, category filtering, and CSV export
-- Full local JSON backup export for transactions, uploads, budgets, merchant rules, and recurring ignore preferences
+- Full local JSON backup export for transactions, uploads, budgets, merchant rules, recurring ignore preferences, and anomaly dismissals
 - Guarded JSON backup restore for moving or recovering local development data
 - Guarded local data reset with typed confirmation
 - Monthly spending summaries
 - Monthly insight reports with highlights, risks, and next actions
 - Cash-flow forecasts from imported activity and upcoming recurring charges
 - Month, category, merchant, and trend analytics
-- Basic anomaly detection
+- Basic anomaly detection with dismiss/restore controls
 - Deterministic question answering for spending, income, account, category, category explanation, merchant, budget, budget recommendation, forecast, recurring charge, monthly report, largest expense, and anomaly questions
 - RAG-style broad Q&A with cited transaction and summary evidence
 - Local Q&A history for recent finance questions and answers
@@ -155,15 +155,18 @@ GET  /recurring
 GET  /recurring/ignored
 GET  /expenses/largest?month=2026-07
 GET  /anomalies?month=2026-07
+GET  /anomalies/ignored
 PUT  /budgets
 PUT  /merchant-rules
 POST /recurring/ignored
+POST /anomalies/{id}/ignore
 PATCH /transactions/{id}/category
 PATCH /transactions/{id}
 DELETE /transactions/{id}
 DELETE /budgets/{id}
 DELETE /merchant-rules/{id}
 DELETE /recurring/ignored/{id}
+DELETE /anomalies/ignored/{id}
 DELETE /data?confirmation=RESET
 POST /ask
 ```
@@ -212,6 +215,11 @@ multiple months, so it becomes useful after importing a few statements. Upload
 Hide a recurring merchant from the dashboard or `POST /recurring/ignored` when a
 detected repeat charge should not affect forecasts or budget recommendations;
 restore it later with `DELETE /recurring/ignored/{id}`.
+
+Dismiss an anomaly from the dashboard or `POST /anomalies/{id}/ignore` when a
+large expense is expected. Dismissed transactions are hidden from anomaly alerts,
+monthly insight anomaly counts, and anomaly Q&A until restored with
+`DELETE /anomalies/ignored/{id}`.
 
 Monthly insight reports combine summary totals, budget progress, recurring charges,
 top merchants, largest expenses, and anomalies into a deterministic snapshot. Ask

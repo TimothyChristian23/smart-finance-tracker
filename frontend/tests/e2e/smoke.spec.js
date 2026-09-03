@@ -75,6 +75,15 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await askPanel.getByRole("button", { name: "Ask" }).click();
   await expect(page.getByTestId("answer-card")).toContainText("Spending for Cash in 2026-07 was $42.00.");
 
+  const anomaliesPanel = page.getByTestId("anomalies-panel");
+  await expect(anomaliesPanel.getByText("One-Time Electronics Store")).toBeVisible();
+  await anomaliesPanel.getByLabel("Dismiss anomaly for One-Time Electronics Store").click();
+  await expect(page.getByTestId("status-message")).toHaveText("Dismissed anomaly for One-Time Electronics Store.");
+  await expect(anomaliesPanel.getByLabel("Restore anomaly for One-Time Electronics Store")).toBeVisible();
+  await anomaliesPanel.getByLabel("Restore anomaly for One-Time Electronics Store").click();
+  await expect(page.getByTestId("status-message")).toHaveText("Restored anomaly for One-Time Electronics Store.");
+  await expect(anomaliesPanel.getByText("One-Time Electronics Store")).toBeVisible();
+
   const downloadPromise = page.waitForEvent("download");
   await importPanel.getByRole("button", { name: "Backup" }).click();
   const download = await downloadPromise;

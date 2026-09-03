@@ -645,7 +645,8 @@ h2 {
 }
 
 .list-row strong,
-.list-row span {
+.list-row span,
+.list-row small {
   display: block;
 }
 
@@ -661,6 +662,13 @@ h2 {
   line-height: 1.35;
 }
 
+.list-row small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
 .list-row b {
   color: var(--ink);
   white-space: nowrap;
@@ -670,34 +678,40 @@ h2 {
   color: var(--warn);
 }
 
-.recurring-list {
+.recurring-list,
+.anomaly-list {
   display: grid;
   gap: 10px;
 }
 
-.recurring-row {
+.recurring-row,
+.anomaly-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(32px, auto);
   align-items: center;
 }
 
-.recurring-action {
+.recurring-action,
+.anomaly-action {
   display: flex;
   align-items: center;
   justify-content: end;
   gap: 8px;
 }
 
-.ignored-recurring-list {
+.ignored-recurring-list,
+.ignored-anomaly-list {
   border-top: 1px solid var(--line);
   padding-top: 10px;
 }
 
-.ignored-recurring-row {
+.ignored-recurring-row,
+.ignored-anomaly-row {
   background: #f8fafb;
 }
 
-.ignored-recurring-row strong {
+.ignored-recurring-row strong,
+.ignored-anomaly-row strong {
   color: var(--muted);
 }
 
@@ -1415,6 +1429,11 @@ h2 {
     grid-template-columns: 1fr;
   }
 
+  .recurring-row,
+  .anomaly-row {
+    grid-template-columns: 1fr;
+  }
+
   .recommendation-action {
     justify-items: stretch;
   }
@@ -1429,6 +1448,11 @@ h2 {
 
   .category-review-action b {
     text-align: left;
+  }
+
+  .recurring-action,
+  .anomaly-action {
+    justify-content: space-between;
   }
 
   .forecast-stats {

@@ -64,6 +64,7 @@ export default function App() {
   const [budgetRecommendations, setBudgetRecommendations] = useState([]);
   const [recurringCharges, setRecurringCharges] = useState([]);
   const [ignoredRecurring, setIgnoredRecurring] = useState([]);
+  const [ignoredAnomalies, setIgnoredAnomalies] = useState([]);
   const [uploads, setUploads] = useState([]);
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
   const [ruleDraft, setRuleDraft] = useState(emptyRuleDraft());
@@ -91,6 +92,7 @@ export default function App() {
     || budgets.length
     || merchantRules.length
     || ignoredRecurring.length
+    || ignoredAnomalies.length
     || askHistory.length
   );
 
@@ -124,6 +126,7 @@ export default function App() {
         budgetRecommendationPayload,
         recurringPayload,
         ignoredRecurringPayload,
+        ignoredAnomaliesPayload,
         uploadPayload,
         askHistoryPayload,
       ] = await Promise.all([
@@ -151,6 +154,7 @@ export default function App() {
         request(`/budgets/recommendations${queryString({ month: activeMonth, limit: 6 })}`),
         request("/recurring?limit=6"),
         request("/recurring/ignored"),
+        request("/anomalies/ignored"),
         request("/uploads?limit=6"),
         request("/ask/history?limit=5"),
       ]);
@@ -174,6 +178,7 @@ export default function App() {
       setBudgetRecommendations(budgetRecommendationPayload);
       setRecurringCharges(recurringPayload);
       setIgnoredRecurring(ignoredRecurringPayload);
+      setIgnoredAnomalies(ignoredAnomaliesPayload);
       setUploads(uploadPayload);
       setAskHistory(askHistoryPayload);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
@@ -339,7 +344,7 @@ export default function App() {
       setUploadStatus("Type RESET first.");
       return;
     }
-    if (!window.confirm("Reset all local finance data? This deletes transactions, upload history, budgets, merchant rules, recurring ignores, and Q&A history.")) return;
+    if (!window.confirm("Reset all local finance data? This deletes transactions, upload history, budgets, merchant rules, recurring ignores, anomaly dismissals, and Q&A history.")) return;
 
     setBusy(true);
     try {
@@ -354,6 +359,7 @@ export default function App() {
       setBudgetDraft({ category: "", amount: "" });
       setRuleDraft(emptyRuleDraft());
       setIgnoredRecurring([]);
+      setIgnoredAnomalies([]);
       setTransactionFilters({ account: "", category: "", search: "" });
       setResetConfirmation("");
       setRestoreConfirmation("");
@@ -399,6 +405,7 @@ export default function App() {
       setBudgetDraft({ category: "", amount: "" });
       setRuleDraft(emptyRuleDraft());
       setIgnoredRecurring([]);
+      setIgnoredAnomalies([]);
       setTransactionFilters({ account: "", category: "", search: "" });
       setResetConfirmation("");
       setRestoreConfirmation("");
@@ -573,6 +580,32 @@ export default function App() {
     try {
       await request(`/recurring/ignored/${ignore.id}`, { method: "DELETE" });
       setUploadStatus(`Restored recurring charge for ${ignore.merchant}.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleIgnoreAnomaly(anomaly) {
+    setBusy(true);
+    try {
+      const ignored = await request(`/anomalies/${anomaly.id}/ignore`, { method: "POST" });
+      setUploadStatus(`Dismissed anomaly for ${ignored.transaction.description}.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRestoreAnomalyIgnore(ignore) {
+    setBusy(true);
+    try {
+      await request(`/anomalies/ignored/${ignore.id}`, { method: "DELETE" });
+      setUploadStatus(`Restored anomaly for ${ignore.transaction.description}.`);
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -900,9 +933,15 @@ export default function App() {
           <MoneyList items={largestExpenses} emptyText="No expenses yet." getTitle={(item) => item.description} getSubtitle={(item) => `${item.category} on ${item.date}`} />
         </section>
 
-        <section className="panel anomalies-panel">
-          <PanelTitle icon={<AlertTriangle size={18} />} title="Anomalies" detail={selectedMonthLabel} />
-          <MoneyList items={anomalies} emptyText="No anomalies yet." getTitle={(item) => item.description} getSubtitle={(item) => item.reason || `${item.category} on ${item.date}`} tone="warn" />
+        <section className="panel anomalies-panel" data-testid="anomalies-panel">
+          <PanelTitle icon={<AlertTriangle size={18} />} title="Anomalies" detail={`${anomalies.length} active`} />
+          <AnomalyList
+            anomalies={anomalies}
+            busy={busy}
+            ignored={ignoredAnomalies}
+            onIgnore={handleIgnoreAnomaly}
+            onRestore={handleRestoreAnomalyIgnore}
+          />
         </section>
       </section>
 
@@ -1241,6 +1280,70 @@ function RecurringList({ busy, charges, ignored, onIgnore, onRestore }) {
       )}
       {!charges.length && (
         <p className="empty">No active recurring charges.</p>
+      )}
+    </div>
+  );
+}
+
+function AnomalyList({ anomalies, busy, ignored, onIgnore, onRestore }) {
+  if (!anomalies.length && !ignored.length) return <p className="empty">No anomalies yet.</p>;
+
+  return (
+    <div className="anomaly-list">
+      {!!anomalies.length && (
+        <div className="list">
+          {anomalies.map((item) => (
+            <div className="list-row anomaly-row" key={item.id}>
+              <div>
+                <strong>{item.description}</strong>
+                <span>{item.reason || `${item.category} on ${item.date}`}</span>
+                <small>{item.category} | {item.date}</small>
+              </div>
+              <div className="anomaly-action">
+                <b className="warn">{money(Math.abs(item.amount))}</b>
+                <button
+                  aria-label={`Dismiss anomaly for ${item.description}`}
+                  className="row-icon-button"
+                  disabled={busy}
+                  onClick={() => onIgnore(item)}
+                  title="Dismiss anomaly"
+                  type="button"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!!ignored.length && (
+        <div className="list ignored-anomaly-list" aria-label="Dismissed anomalies">
+          {ignored.map((item) => (
+            <div className="list-row anomaly-row ignored-anomaly-row" key={item.id}>
+              <div>
+                <strong>{item.transaction.description}</strong>
+                <span>Dismissed from anomaly alerts</span>
+                <small>{item.transaction.category} | {item.transaction.date}</small>
+              </div>
+              <div className="anomaly-action">
+                <b>{money(Math.abs(item.transaction.amount))}</b>
+                <button
+                  aria-label={`Restore anomaly for ${item.transaction.description}`}
+                  className="row-icon-button"
+                  disabled={busy}
+                  onClick={() => onRestore(item)}
+                  title="Restore anomaly"
+                  type="button"
+                >
+                  <RefreshCw size={15} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!anomalies.length && (
+        <p className="empty">No active anomalies.</p>
       )}
     </div>
   );

@@ -684,6 +684,11 @@ def test_data_export_backup_includes_local_finance_records():
         json={"month": "2026-07", "category": "Dining", "amount": 200},
     )
     client.post("/recurring/ignored", json={"merchant": "Netflix Subscription"})
+    anomaly = next(
+        item for item in client.get("/anomalies?month=2026-07").json()
+        if item["description"] == "One-Time Electronics Store"
+    )
+    client.post(f"/anomalies/{anomaly['id']}/ignore")
 
     response = client.get("/data/export")
 
@@ -697,6 +702,7 @@ def test_data_export_backup_includes_local_finance_records():
         "uploads": 1,
         "merchant_rules": 1,
         "recurring_ignores": 1,
+        "anomaly_ignores": 1,
         "budgets": 1,
         "ask_history": 0,
         "months": 1,
@@ -706,6 +712,7 @@ def test_data_export_backup_includes_local_finance_records():
     assert payload["uploads"][0]["filename"] == "sample.csv"
     assert payload["merchant_rules"][0]["merchant"] == "Trader Joes"
     assert payload["recurring_ignores"][0]["merchant"] == "Netflix Subscription"
+    assert payload["anomaly_ignores"][0]["transaction"]["description"] == "One-Time Electronics Store"
     assert payload["budgets"][0]["category"] == "Dining"
     assert any(
         item["description"] == "Trader Joes" and item["category"] == "Dining"
@@ -729,6 +736,11 @@ def test_data_import_restores_backup_and_recalculates_analytics():
     )
     client.put("/budgets", json={"month": "2026-07", "category": "Dining", "amount": 200})
     client.post("/recurring/ignored", json={"merchant": "Netflix Subscription"})
+    anomaly = next(
+        item for item in client.get("/anomalies?month=2026-07").json()
+        if item["description"] == "One-Time Electronics Store"
+    )
+    client.post(f"/anomalies/{anomaly['id']}/ignore")
     client.post("/ask", json={"question": "How much did I spend on food in 2026-07?"})
     backup = client.get("/data/export").json()
 
@@ -749,6 +761,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
             "uploads": 1,
             "merchant_rules": 1,
             "recurring_ignores": 1,
+            "anomaly_ignores": 1,
             "budgets": 1,
             "ask_history": 1,
         },
@@ -760,6 +773,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
     assert client.get("/uploads").json()[0]["account_name"] == "Chase Checking"
     assert client.get("/merchant-rules").json()[0]["merchant"] == "Trader Joes"
     assert client.get("/recurring/ignored").json()[0]["merchant"] == "Netflix Subscription"
+    assert client.get("/anomalies/ignored").json()[0]["transaction"]["description"] == "One-Time Electronics Store"
     assert client.get("/budgets?month=2026-07").json()[0]["category"] == "Dining"
     assert client.get("/ask/history").json()[0]["question"] == "How much did I spend on food in 2026-07?"
     assert client.get("/accounts/summary?month=2026-07").json()[0]["account_name"] == "Chase Checking"
@@ -840,6 +854,11 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
         json={"month": "2026-07", "category": "Dining", "amount": 200},
     )
     client.post("/recurring/ignored", json={"merchant": "Netflix Subscription"})
+    anomaly = next(
+        item for item in client.get("/anomalies?month=2026-07").json()
+        if item["description"] == "One-Time Electronics Store"
+    )
+    client.post(f"/anomalies/{anomaly['id']}/ignore")
     client.post("/ask", json={"question": "How much did I spend on food in 2026-07?"})
 
     rejected = client.delete("/data")
@@ -858,6 +877,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
         "uploads": 0,
         "merchant_rules": 0,
         "recurring_ignores": 0,
+        "anomaly_ignores": 0,
         "budgets": 0,
         "ask_history": 0,
         "months": 0,
@@ -866,6 +886,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
     assert client.get("/uploads").json() == []
     assert client.get("/merchant-rules").json() == []
     assert client.get("/recurring/ignored").json() == []
+    assert client.get("/anomalies/ignored").json() == []
     assert client.get("/budgets?month=2026-07").json() == []
     assert client.get("/ask/history").json() == []
 
@@ -1124,6 +1145,52 @@ def test_anomalies_include_large_category_outlier():
     assert response.status_code == 200
     descriptions = [item["description"] for item in response.json()]
     assert "One-Time Electronics Store" in descriptions
+
+
+def test_anomaly_ignore_hides_and_restores_outlier_everywhere():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    target = next(
+        item for item in client.get("/anomalies?month=2026-07").json()
+        if item["description"] == "One-Time Electronics Store"
+    )
+
+    response = client.post(f"/anomalies/{target['id']}/ignore")
+
+    assert response.status_code == 200
+    hidden = response.json()
+    assert hidden["transaction"]["description"] == "One-Time Electronics Store"
+    assert hidden["transaction"]["amount"] == -899.0
+    assert hidden["transaction_key"]
+    assert client.get("/anomalies/ignored").json()[0]["transaction"]["description"] == "One-Time Electronics Store"
+
+    active = client.get("/anomalies?month=2026-07").json()
+    active_descriptions = {item["description"] for item in active}
+    assert "One-Time Electronics Store" not in active_descriptions
+    assert "DoorDash" in active_descriptions
+
+    insights = client.get("/insights/monthly?month=2026-07").json()
+    assert insights["anomaly_count"] == len(active)
+
+    answer = client.post("/ask", json={"question": "Any unusual charges in 2026-07?"}).json()
+    assert answer["intent"] == "anomalies"
+    assert all(item["description"] != "One-Time Electronics Store" for item in answer["data"])
+
+    restore_response = client.delete(f"/anomalies/ignored/{hidden['id']}")
+
+    assert restore_response.status_code == 200
+    restored = {
+        item["description"]
+        for item in client.get("/anomalies?month=2026-07").json()
+    }
+    assert "One-Time Electronics Store" in restored
+    assert client.get("/anomalies/ignored").json() == []
+
+
+def test_anomaly_ignore_returns_not_found_for_missing_transaction():
+    response = client.post("/anomalies/999999/ignore")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Transaction not found."
 
 
 def test_analytics_endpoints_return_months_categories_trends_and_merchants():

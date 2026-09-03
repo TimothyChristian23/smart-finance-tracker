@@ -30,6 +30,7 @@ from app.database import (
     category_totals,
     cents_to_dollars,
     create_transaction,
+    delete_anomaly_ignore,
     delete_budget,
     delete_merchant_rule,
     delete_recurring_ignore,
@@ -39,8 +40,10 @@ from app.database import (
     get_transaction,
     ignore_recurring_merchant,
     insert_transactions,
+    ignore_anomaly_transaction,
     largest_expenses,
     list_accounts,
+    list_anomaly_ignores,
     list_ask_history,
     list_merchant_rules,
     list_recurring_ignores,
@@ -164,6 +167,7 @@ class DataRestoreCounts(BaseModel):
     uploads: int
     merchant_rules: int
     recurring_ignores: int
+    anomaly_ignores: int
     budgets: int
     ask_history: int
 
@@ -290,6 +294,22 @@ class RecurringIgnoreResponse(BaseModel):
     id: int
     merchant: str
     merchant_key: str
+    created_at: str
+
+
+class AnomalyIgnoredTransactionResponse(BaseModel):
+    date: str
+    description: str
+    amount: float
+    category: str
+    source_file: str | None = None
+    account_name: str | None = None
+
+
+class AnomalyIgnoreResponse(BaseModel):
+    id: int
+    transaction_key: str
+    transaction: AnomalyIgnoredTransactionResponse
     created_at: str
 
 
@@ -782,6 +802,26 @@ async def restore_recurring(ignore_id: int) -> dict:
     if not delete_recurring_ignore(ignore_id):
         raise HTTPException(status_code=404, detail="Recurring ignore not found.")
     return {"message": "Recurring merchant restored."}
+
+
+@app.get("/anomalies/ignored", response_model=list[AnomalyIgnoreResponse])
+async def ignored_anomalies() -> list[dict]:
+    return list_anomaly_ignores()
+
+
+@app.post("/anomalies/{transaction_id}/ignore", response_model=AnomalyIgnoreResponse)
+async def ignore_anomaly(transaction_id: int) -> dict:
+    ignored = ignore_anomaly_transaction(transaction_id)
+    if ignored is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    return ignored
+
+
+@app.delete("/anomalies/ignored/{ignore_id}")
+async def restore_anomaly(ignore_id: int) -> dict:
+    if not delete_anomaly_ignore(ignore_id):
+        raise HTTPException(status_code=404, detail="Anomaly ignore not found.")
+    return {"message": "Anomaly restored."}
 
 
 @app.get("/anomalies", response_model=list[dict])
