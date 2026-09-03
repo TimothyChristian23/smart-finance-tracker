@@ -683,6 +683,7 @@ def test_data_export_backup_includes_local_finance_records():
         "/budgets",
         json={"month": "2026-07", "category": "Dining", "amount": 200},
     )
+    client.post("/recurring/ignored", json={"merchant": "Netflix Subscription"})
 
     response = client.get("/data/export")
 
@@ -695,6 +696,7 @@ def test_data_export_backup_includes_local_finance_records():
         "transactions": 11,
         "uploads": 1,
         "merchant_rules": 1,
+        "recurring_ignores": 1,
         "budgets": 1,
         "ask_history": 0,
         "months": 1,
@@ -703,6 +705,7 @@ def test_data_export_backup_includes_local_finance_records():
     assert payload["months"][0]["month"] == "2026-07"
     assert payload["uploads"][0]["filename"] == "sample.csv"
     assert payload["merchant_rules"][0]["merchant"] == "Trader Joes"
+    assert payload["recurring_ignores"][0]["merchant"] == "Netflix Subscription"
     assert payload["budgets"][0]["category"] == "Dining"
     assert any(
         item["description"] == "Trader Joes" and item["category"] == "Dining"
@@ -725,6 +728,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
         json={"category": "Dining", "remember": True},
     )
     client.put("/budgets", json={"month": "2026-07", "category": "Dining", "amount": 200})
+    client.post("/recurring/ignored", json={"merchant": "Netflix Subscription"})
     client.post("/ask", json={"question": "How much did I spend on food in 2026-07?"})
     backup = client.get("/data/export").json()
 
@@ -744,6 +748,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
             "transactions": 11,
             "uploads": 1,
             "merchant_rules": 1,
+            "recurring_ignores": 1,
             "budgets": 1,
             "ask_history": 1,
         },
@@ -754,6 +759,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
     assert summary["transaction_count"] == 11
     assert client.get("/uploads").json()[0]["account_name"] == "Chase Checking"
     assert client.get("/merchant-rules").json()[0]["merchant"] == "Trader Joes"
+    assert client.get("/recurring/ignored").json()[0]["merchant"] == "Netflix Subscription"
     assert client.get("/budgets?month=2026-07").json()[0]["category"] == "Dining"
     assert client.get("/ask/history").json()[0]["question"] == "How much did I spend on food in 2026-07?"
     assert client.get("/accounts/summary?month=2026-07").json()[0]["account_name"] == "Chase Checking"
@@ -833,6 +839,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
         "/budgets",
         json={"month": "2026-07", "category": "Dining", "amount": 200},
     )
+    client.post("/recurring/ignored", json={"merchant": "Netflix Subscription"})
     client.post("/ask", json={"question": "How much did I spend on food in 2026-07?"})
 
     rejected = client.delete("/data")
@@ -850,6 +857,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
         "transactions": 0,
         "uploads": 0,
         "merchant_rules": 0,
+        "recurring_ignores": 0,
         "budgets": 0,
         "ask_history": 0,
         "months": 0,
@@ -857,6 +865,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
     assert client.get("/transactions").json() == []
     assert client.get("/uploads").json() == []
     assert client.get("/merchant-rules").json() == []
+    assert client.get("/recurring/ignored").json() == []
     assert client.get("/budgets?month=2026-07").json() == []
     assert client.get("/ask/history").json() == []
 
@@ -1290,6 +1299,7 @@ def test_recurring_endpoint_detects_monthly_charges():
     assert set(merchants) == {"Gym Membership", "Netflix Subscription"}
 
     netflix = merchants["Netflix Subscription"]
+    assert netflix["merchant_key"] == "netflix subscription"
     assert netflix["average_amount"] == 15.99
     assert netflix["total_amount"] == 47.97
     assert netflix["occurrences"] == 3
@@ -1297,6 +1307,35 @@ def test_recurring_endpoint_detects_monthly_charges():
     assert netflix["first_seen"] == "2026-05-03"
     assert netflix["last_seen"] == "2026-07-03"
     assert netflix["next_expected_date"] == "2026-08-03"
+
+
+def test_recurring_ignore_hides_merchants_from_detection_and_forecast():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    response = client.post("/recurring/ignored", json={"merchant": "NETFLIX SUBSCRIPTION 1234 CA"})
+
+    assert response.status_code == 200
+    hidden = response.json()
+    assert hidden["merchant"] == "Netflix Subscription"
+    assert hidden["merchant_key"] == "netflix subscription"
+    assert client.get("/recurring/ignored").json()[0]["merchant"] == "Netflix Subscription"
+
+    active_merchants = {
+        item["merchant"]
+        for item in client.get("/recurring").json()
+    }
+    assert active_merchants == {"Gym Membership"}
+
+    forecast = client.get("/forecast/monthly?month=2026-08").json()
+    assert forecast["upcoming_recurring_total"] == 44.67
+    assert {item["merchant"] for item in forecast["upcoming_recurring"]} == {"Gym Membership"}
+
+    restore_response = client.delete(f"/recurring/ignored/{hidden['id']}")
+    assert restore_response.status_code == 200
+    assert {
+        item["merchant"]
+        for item in client.get("/recurring").json()
+    } == {"Gym Membership", "Netflix Subscription"}
 
 
 def test_ask_handles_spending_income_and_ranking_questions():

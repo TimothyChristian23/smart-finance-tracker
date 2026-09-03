@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../..");
 const sampleCsvPath = path.join(repoRoot, "data", "sample_transactions.csv");
+const sampleRecurringCsvPath = path.join(repoRoot, "data", "sample_recurring_transactions.csv");
 const sampleTransactionCount = fs.readFileSync(sampleCsvPath, "utf8").trim().split(/\r?\n/).length - 1;
 const apiBase = process.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
@@ -18,7 +19,7 @@ test.afterEach(async ({ request }) => {
   await request.delete(`${apiBase}/data?confirmation=RESET`);
 });
 
-test("imports, edits, deletes, restores, and answers from the UI", async ({ page }, testInfo) => {
+test("imports, edits, deletes, restores, and answers from the UI", async ({ page, request }, testInfo) => {
   page.on("dialog", (dialog) => dialog.accept());
 
   await page.goto("/");
@@ -79,6 +80,30 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   const download = await downloadPromise;
   const backupPath = testInfo.outputPath(download.suggestedFilename());
   await download.saveAs(backupPath);
+
+  const recurringUpload = await request.post(`${apiBase}/transactions/upload`, {
+    multipart: {
+      file: {
+        name: "sample_recurring_transactions.csv",
+        mimeType: "text/csv",
+        buffer: fs.readFileSync(sampleRecurringCsvPath),
+      },
+    },
+  });
+  expect(recurringUpload.ok()).toBeTruthy();
+
+  await page.reload();
+  await expect(page.getByText("Online")).toBeVisible();
+  await page.getByLabel("Month").selectOption("2026-07");
+  const recurringPanel = page.getByTestId("recurring-panel");
+  await expect(recurringPanel.getByText("Gym Membership")).toBeVisible();
+  await recurringPanel.getByLabel("Hide recurring charge for Gym Membership").click();
+  await expect(page.getByTestId("status-message")).toHaveText("Hid recurring charge for Gym Membership.");
+  await expect(recurringPanel.getByLabel("Restore recurring charge for Gym Membership")).toBeVisible();
+  await recurringPanel.getByLabel("Restore recurring charge for Gym Membership").click();
+  await expect(page.getByTestId("status-message")).toHaveText("Restored recurring charge for Gym Membership.");
+  await expect(recurringPanel.getByText("Gym Membership")).toBeVisible();
+  await expect(transactionsPanel.getByText("Cash Lunch")).toBeVisible();
 
   await transactionsPanel.getByLabel("Edit Cash Lunch").click();
   await expect(modal.getByRole("heading", { name: "Cash Lunch" })).toBeVisible();

@@ -32,15 +32,18 @@ from app.database import (
     create_transaction,
     delete_budget,
     delete_merchant_rule,
+    delete_recurring_ignore,
     delete_transaction,
     detect_anomalies,
     export_backup,
     get_transaction,
+    ignore_recurring_merchant,
     insert_transactions,
     largest_expenses,
     list_accounts,
     list_ask_history,
     list_merchant_rules,
+    list_recurring_ignores,
     list_transactions,
     list_uploads,
     monthly_forecast,
@@ -160,6 +163,7 @@ class DataRestoreCounts(BaseModel):
     transactions: int
     uploads: int
     merchant_rules: int
+    recurring_ignores: int
     budgets: int
     ask_history: int
 
@@ -266,6 +270,7 @@ class BudgetRecommendationResponse(BaseModel):
 
 class RecurringChargeResponse(BaseModel):
     merchant: str
+    merchant_key: str
     category: str
     average_amount: float
     total_amount: float
@@ -275,6 +280,17 @@ class RecurringChargeResponse(BaseModel):
     next_expected_date: str
     cadence: str
     confidence: float
+
+
+class RecurringIgnoreRequest(BaseModel):
+    merchant: str = Field(..., min_length=1, max_length=200)
+
+
+class RecurringIgnoreResponse(BaseModel):
+    id: int
+    merchant: str
+    merchant_key: str
+    created_at: str
 
 
 class SummaryCategory(BaseModel):
@@ -748,6 +764,24 @@ async def trends(limit: int = 12) -> list[dict]:
 @app.get("/merchants")
 async def merchants(month: str | None = None, limit: int = 10) -> list[dict]:
     return top_merchants(month=validate_month(month), limit=bounded_limit(limit))
+
+
+@app.get("/recurring/ignored", response_model=list[RecurringIgnoreResponse])
+async def ignored_recurring() -> list[dict]:
+    return list_recurring_ignores()
+
+
+@app.post("/recurring/ignored", response_model=RecurringIgnoreResponse)
+async def ignore_recurring(request: RecurringIgnoreRequest) -> dict:
+    merchant = validate_transaction_description(request.merchant)
+    return ignore_recurring_merchant(merchant)
+
+
+@app.delete("/recurring/ignored/{ignore_id}")
+async def restore_recurring(ignore_id: int) -> dict:
+    if not delete_recurring_ignore(ignore_id):
+        raise HTTPException(status_code=404, detail="Recurring ignore not found.")
+    return {"message": "Recurring merchant restored."}
 
 
 @app.get("/anomalies", response_model=list[dict])

@@ -128,6 +128,16 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS recurring_ignores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            merchant_key TEXT NOT NULL UNIQUE,
+            merchant_name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS budgets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             month TEXT NOT NULL,
@@ -215,6 +225,7 @@ def reset_all_data() -> None:
         conn.execute("DELETE FROM transactions")
         conn.execute("DELETE FROM upload_history")
         conn.execute("DELETE FROM merchant_rules")
+        conn.execute("DELETE FROM recurring_ignores")
         conn.execute("DELETE FROM budgets")
         conn.execute("DELETE FROM ask_history")
         conn.commit()
@@ -666,6 +677,59 @@ def delete_merchant_rule(rule_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+def list_recurring_ignores() -> list[dict]:
+    """Return recurring merchants that the user has hidden."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, merchant_name, merchant_key, created_at
+            FROM recurring_ignores
+            ORDER BY merchant_name
+            """
+        ).fetchall()
+    return [_recurring_ignore_row_to_dict(row) for row in rows]
+
+
+def ignore_recurring_merchant(merchant_name: str) -> dict:
+    """Hide a normalized merchant from recurring charge detection."""
+    cleaned_name = clean_merchant_description(merchant_name)
+    target_key = merchant_key(cleaned_name)
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO recurring_ignores (merchant_key, merchant_name)
+            VALUES (?, ?)
+            ON CONFLICT(merchant_key) DO UPDATE SET
+                merchant_name = excluded.merchant_name
+            """,
+            (target_key, cleaned_name),
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT id, merchant_name, merchant_key, created_at
+            FROM recurring_ignores
+            WHERE merchant_key = ?
+            """,
+            (target_key,),
+        ).fetchone()
+    return _recurring_ignore_row_to_dict(row)
+
+
+def delete_recurring_ignore(ignore_id: int) -> bool:
+    """Restore a hidden recurring merchant by ignore id."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM recurring_ignores
+            WHERE id = ?
+            """,
+            (ignore_id,),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+
 def budget_progress(month: str) -> list[dict]:
     """Return monthly budget targets with live spending progress."""
     where_sql, params = _month_filter(month)
@@ -904,6 +968,7 @@ def export_backup() -> dict:
     transactions = list_transactions(limit=100000)
     uploads = list_uploads(limit=100000)
     merchant_rules = list_merchant_rules()
+    recurring_ignores = list_recurring_ignores()
     budgets = list_all_budgets()
     ask_history = list_ask_history(limit=100000)
     months = available_months()
@@ -916,6 +981,7 @@ def export_backup() -> dict:
             "transactions": len(transactions),
             "uploads": len(uploads),
             "merchant_rules": len(merchant_rules),
+            "recurring_ignores": len(recurring_ignores),
             "budgets": len(budgets),
             "ask_history": len(ask_history),
             "months": len(months),
@@ -925,6 +991,7 @@ def export_backup() -> dict:
         "transactions": transactions,
         "budgets": budgets,
         "merchant_rules": merchant_rules,
+        "recurring_ignores": recurring_ignores,
         "ask_history": ask_history,
         "uploads": uploads,
     }
@@ -940,10 +1007,13 @@ def restore_backup(backup: dict) -> dict:
     transactions = _restore_transactions(backup)
     uploads = _restore_uploads(backup)
     merchant_rules = _restore_merchant_rules(backup)
+    recurring_ignores = _restore_recurring_ignores(backup)
     budgets = _restore_budgets(backup)
     ask_history = _restore_ask_history(backup)
     if len({row[0] for row in merchant_rules}) != len(merchant_rules):
         raise ValueError("Backup contains duplicate merchant rules.")
+    if len({row[0] for row in recurring_ignores}) != len(recurring_ignores):
+        raise ValueError("Backup contains duplicate recurring ignores.")
     if len({(row[0], row[1]) for row in budgets}) != len(budgets):
         raise ValueError("Backup contains duplicate budgets.")
 
@@ -951,6 +1021,7 @@ def restore_backup(backup: dict) -> dict:
         conn.execute("DELETE FROM transactions")
         conn.execute("DELETE FROM upload_history")
         conn.execute("DELETE FROM merchant_rules")
+        conn.execute("DELETE FROM recurring_ignores")
         conn.execute("DELETE FROM budgets")
         conn.execute("DELETE FROM ask_history")
         conn.executemany(
@@ -999,6 +1070,17 @@ def restore_backup(backup: dict) -> dict:
         )
         conn.executemany(
             """
+            INSERT INTO recurring_ignores (
+                merchant_key,
+                merchant_name,
+                created_at
+            )
+            VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            recurring_ignores,
+        )
+        conn.executemany(
+            """
             INSERT INTO budgets (
                 month,
                 category,
@@ -1030,6 +1112,7 @@ def restore_backup(backup: dict) -> dict:
         "transactions": len(transactions),
         "uploads": len(uploads),
         "merchant_rules": len(merchant_rules),
+        "recurring_ignores": len(recurring_ignores),
         "budgets": len(budgets),
         "ask_history": len(ask_history),
     }
@@ -1417,13 +1500,20 @@ def recurring_charges(limit: int = 10, min_occurrences: int = 3) -> list[dict]:
             ORDER BY lower(trim(description)), transaction_date
             """
         ).fetchall()
+        ignored_keys = {
+            row["merchant_key"]
+            for row in conn.execute("SELECT merchant_key FROM recurring_ignores").fetchall()
+        }
 
     grouped: dict[str, list[sqlite3.Row]] = {}
     for row in rows:
-        grouped.setdefault(merchant_key(row["description"]), []).append(row)
+        key = merchant_key(row["description"])
+        if key in ignored_keys:
+            continue
+        grouped.setdefault(key, []).append(row)
 
     charges = []
-    for items in grouped.values():
+    for recurring_key, items in grouped.items():
         if len(items) < min_occurrences:
             continue
 
@@ -1451,6 +1541,7 @@ def recurring_charges(limit: int = 10, min_occurrences: int = 3) -> list[dict]:
 
         charges.append({
             "merchant": clean_merchant_description(items[-1]["description"]),
+            "merchant_key": recurring_key,
             "category": items[-1]["category"],
             "average_amount": cents_to_dollars(average_cents),
             "total_amount": cents_to_dollars(total_cents),
@@ -1835,6 +1926,15 @@ def _merchant_rule_row_to_dict(row: sqlite3.Row) -> dict:
     }
 
 
+def _recurring_ignore_row_to_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "merchant": row["merchant_name"],
+        "merchant_key": row["merchant_key"],
+        "created_at": row["created_at"],
+    }
+
+
 def _ask_history_row_to_dict(row: sqlite3.Row) -> dict:
     try:
         categories = json.loads(row["categories_json"] or "[]")
@@ -1942,6 +2042,24 @@ def _restore_merchant_rules(backup: dict) -> list[tuple]:
             _backup_required_text(record, "category", f"merchant_rules[{index}]", max_length=80),
             updated_at,
             updated_at,
+        ))
+    return rows
+
+
+def _restore_recurring_ignores(backup: dict) -> list[tuple]:
+    rows = []
+    for index, item in enumerate(_backup_list(backup, "recurring_ignores"), start=1):
+        record = _backup_object(item, f"recurring_ignores[{index}]")
+        merchant_name = clean_merchant_description(
+            _backup_required_text(record, "merchant", f"recurring_ignores[{index}]", max_length=200)
+        )
+        merchant_key_value = merchant_key(
+            _backup_optional_text(record, "merchant_key", max_length=200) or merchant_name
+        )
+        rows.append((
+            merchant_key_value,
+            merchant_name,
+            _backup_optional_text(record, "created_at", max_length=80),
         ))
     return rows
 

@@ -63,6 +63,7 @@ export default function App() {
   const [budgets, setBudgets] = useState([]);
   const [budgetRecommendations, setBudgetRecommendations] = useState([]);
   const [recurringCharges, setRecurringCharges] = useState([]);
+  const [ignoredRecurring, setIgnoredRecurring] = useState([]);
   const [uploads, setUploads] = useState([]);
   const [budgetDraft, setBudgetDraft] = useState({ category: "", amount: "" });
   const [ruleDraft, setRuleDraft] = useState(emptyRuleDraft());
@@ -84,7 +85,14 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState("");
 
   const selectedMonthLabel = month || "All imported data";
-  const hasLocalData = Boolean(months.length || uploads.length || budgets.length || merchantRules.length || askHistory.length);
+  const hasLocalData = Boolean(
+    months.length
+    || uploads.length
+    || budgets.length
+    || merchantRules.length
+    || ignoredRecurring.length
+    || askHistory.length
+  );
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -115,6 +123,7 @@ export default function App() {
         budgetPayload,
         budgetRecommendationPayload,
         recurringPayload,
+        ignoredRecurringPayload,
         uploadPayload,
         askHistoryPayload,
       ] = await Promise.all([
@@ -141,6 +150,7 @@ export default function App() {
         request(`/budgets${queryString({ month: activeMonth })}`),
         request(`/budgets/recommendations${queryString({ month: activeMonth, limit: 6 })}`),
         request("/recurring?limit=6"),
+        request("/recurring/ignored"),
         request("/uploads?limit=6"),
         request("/ask/history?limit=5"),
       ]);
@@ -163,6 +173,7 @@ export default function App() {
       setBudgets(budgetPayload);
       setBudgetRecommendations(budgetRecommendationPayload);
       setRecurringCharges(recurringPayload);
+      setIgnoredRecurring(ignoredRecurringPayload);
       setUploads(uploadPayload);
       setAskHistory(askHistoryPayload);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
@@ -328,7 +339,7 @@ export default function App() {
       setUploadStatus("Type RESET first.");
       return;
     }
-    if (!window.confirm("Reset all local finance data? This deletes transactions, upload history, budgets, merchant rules, and Q&A history.")) return;
+    if (!window.confirm("Reset all local finance data? This deletes transactions, upload history, budgets, merchant rules, recurring ignores, and Q&A history.")) return;
 
     setBusy(true);
     try {
@@ -342,6 +353,7 @@ export default function App() {
       setAskHistory([]);
       setBudgetDraft({ category: "", amount: "" });
       setRuleDraft(emptyRuleDraft());
+      setIgnoredRecurring([]);
       setTransactionFilters({ account: "", category: "", search: "" });
       setResetConfirmation("");
       setRestoreConfirmation("");
@@ -386,6 +398,7 @@ export default function App() {
       setAskHistory([]);
       setBudgetDraft({ category: "", amount: "" });
       setRuleDraft(emptyRuleDraft());
+      setIgnoredRecurring([]);
       setTransactionFilters({ account: "", category: "", search: "" });
       setResetConfirmation("");
       setRestoreConfirmation("");
@@ -530,6 +543,36 @@ export default function App() {
         ? `Saved ${payload.rule.category} rule for ${payload.rule.merchant} and updated ${payload.updated_transactions} ${transactionText}.`
         : `Saved ${payload.rule.category} rule for ${payload.rule.merchant}.`);
       setRuleDraft({ ...emptyRuleDraft(), category: payload.rule.category });
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleIgnoreRecurring(charge) {
+    setBusy(true);
+    try {
+      const hidden = await request("/recurring/ignored", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ merchant: charge.merchant }),
+      });
+      setUploadStatus(`Hid recurring charge for ${hidden.merchant}.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRestoreRecurringIgnore(ignore) {
+    setBusy(true);
+    try {
+      await request(`/recurring/ignored/${ignore.id}`, { method: "DELETE" });
+      setUploadStatus(`Restored recurring charge for ${ignore.merchant}.`);
       await refreshDashboard();
     } catch (error) {
       setUploadStatus(error.message);
@@ -740,9 +783,15 @@ export default function App() {
           />
         </section>
 
-        <section className="panel recurring-panel">
-          <PanelTitle icon={<Repeat2 size={18} />} title="Recurring Charges" detail={`${recurringCharges.length} detected`} />
-          <RecurringList charges={recurringCharges} />
+        <section className="panel recurring-panel" data-testid="recurring-panel">
+          <PanelTitle icon={<Repeat2 size={18} />} title="Recurring Charges" detail={`${recurringCharges.length} active`} />
+          <RecurringList
+            busy={busy}
+            charges={recurringCharges}
+            ignored={ignoredRecurring}
+            onIgnore={handleIgnoreRecurring}
+            onRestore={handleRestoreRecurringIgnore}
+          />
         </section>
 
         <section className="panel action-panel" data-testid="import-panel">
@@ -1136,22 +1185,63 @@ function BudgetRow({ budget, busy, onDelete }) {
   );
 }
 
-function RecurringList({ charges }) {
-  if (!charges.length) return <p className="empty">No recurring charges detected yet.</p>;
+function RecurringList({ busy, charges, ignored, onIgnore, onRestore }) {
+  if (!charges.length && !ignored.length) return <p className="empty">No recurring charges detected yet.</p>;
 
   return (
-    <div className="list">
-      {charges.map((charge) => (
-        <div className="list-row" key={`${charge.merchant}-${charge.first_seen}`}>
-          <div>
-            <strong>{charge.merchant}</strong>
-            <span>
-              {charge.cadence} | {charge.occurrences} charges | next {charge.next_expected_date}
-            </span>
-          </div>
-          <b>{money(charge.average_amount)}</b>
+    <div className="recurring-list">
+      {!!charges.length && (
+        <div className="list">
+          {charges.map((charge) => (
+            <div className="list-row recurring-row" key={`${charge.merchant}-${charge.first_seen}`}>
+              <div>
+                <strong>{charge.merchant}</strong>
+                <span>
+                  {charge.cadence} | {charge.occurrences} charges | next {charge.next_expected_date}
+                </span>
+              </div>
+              <div className="recurring-action">
+                <b>{money(charge.average_amount)}</b>
+                <button
+                  aria-label={`Hide recurring charge for ${charge.merchant}`}
+                  className="row-icon-button"
+                  disabled={busy}
+                  onClick={() => onIgnore(charge)}
+                  title="Hide recurring charge"
+                  type="button"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+      {!!ignored.length && (
+        <div className="list ignored-recurring-list" aria-label="Hidden recurring merchants">
+          {ignored.map((item) => (
+            <div className="list-row recurring-row ignored-recurring-row" key={item.id}>
+              <div>
+                <strong>{item.merchant}</strong>
+                <span>Hidden from forecasts and budget recommendations</span>
+              </div>
+              <button
+                aria-label={`Restore recurring charge for ${item.merchant}`}
+                className="row-icon-button"
+                disabled={busy}
+                onClick={() => onRestore(item)}
+                title="Restore recurring charge"
+                type="button"
+              >
+                <RefreshCw size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {!charges.length && (
+        <p className="empty">No active recurring charges.</p>
+      )}
     </div>
   );
 }

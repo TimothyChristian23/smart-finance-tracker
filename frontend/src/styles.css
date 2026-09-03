@@ -670,6 +670,37 @@ h2 {
   color: var(--warn);
 }
 
+.recurring-list {
+  display: grid;
+  gap: 10px;
+}
+
+.recurring-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(32px, auto);
+  align-items: center;
+}
+
+.recurring-action {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 8px;
+}
+
+.ignored-recurring-list {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.ignored-recurring-row {
+  background: #f8fafb;
+}
+
+.ignored-recurring-row strong {
+  color: var(--muted);
+}
+
 .account-summary-list {
   display: grid;
   gap: 9px;

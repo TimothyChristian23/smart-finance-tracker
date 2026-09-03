@@ -26,9 +26,9 @@ The first implementation slice focuses on trustworthy analytics:
 - Individual transaction deletion with confirmation
 - Monthly category budgets with live progress
 - Budget recommendations from recent history and recurring charges
-- Recurring charge and subscription detection
+- Recurring charge and subscription detection with hide/restore controls
 - Transaction search, category filtering, and CSV export
-- Full local JSON backup export for transactions, uploads, budgets, and merchant rules
+- Full local JSON backup export for transactions, uploads, budgets, merchant rules, and recurring ignore preferences
 - Guarded JSON backup restore for moving or recovering local development data
 - Guarded local data reset with typed confirmation
 - Monthly spending summaries
@@ -152,15 +152,18 @@ GET  /trends
 GET  /merchants?month=2026-07
 GET  /merchant-rules
 GET  /recurring
+GET  /recurring/ignored
 GET  /expenses/largest?month=2026-07
 GET  /anomalies?month=2026-07
 PUT  /budgets
 PUT  /merchant-rules
+POST /recurring/ignored
 PATCH /transactions/{id}/category
 PATCH /transactions/{id}
 DELETE /transactions/{id}
 DELETE /budgets/{id}
 DELETE /merchant-rules/{id}
+DELETE /recurring/ignored/{id}
 DELETE /data?confirmation=RESET
 POST /ask
 ```
@@ -206,6 +209,9 @@ the API requires the same confirmation with `DELETE /data?confirmation=RESET`.
 Recurring charge detection needs the same normalized merchant to appear across
 multiple months, so it becomes useful after importing a few statements. Upload
 `data/sample_recurring_transactions.csv` if you want demo recurring charges right away.
+Hide a recurring merchant from the dashboard or `POST /recurring/ignored` when a
+detected repeat charge should not affect forecasts or budget recommendations;
+restore it later with `DELETE /recurring/ignored/{id}`.
 
 Monthly insight reports combine summary totals, budget progress, recurring charges,
 top merchants, largest expenses, and anomalies into a deterministic snapshot. Ask
