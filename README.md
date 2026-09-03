@@ -28,6 +28,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Monthly category budgets with live progress
 - Budget recommendations from recent history and recurring charges
 - Recurring charge and subscription detection with hide/restore controls
+- Recurring bill calendar for expected upcoming charges
 - Transaction search, category filtering, and CSV export
 - Full local JSON backup export for transactions, uploads, budgets, merchant rules, CSV mapping presets, recurring ignore preferences, and anomaly dismissals
 - Guarded JSON backup restore for moving or recovering local development data
@@ -37,7 +38,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Cash-flow forecasts from imported activity and upcoming recurring charges
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection with dismiss/restore controls
-- Deterministic question answering for spending, income, account, category, category explanation, merchant, budget, budget recommendation, forecast, recurring charge, monthly report, largest expense, and anomaly questions
+- Deterministic question answering for spending, income, account, category, category explanation, merchant, budget, budget recommendation, forecast, bill calendar, recurring charge, monthly report, largest expense, and anomaly questions
 - RAG-style broad Q&A with cited transaction and summary evidence
 - Local Q&A history for recent finance questions and answers
 - React dashboard scaffold
@@ -154,6 +155,7 @@ GET  /trends
 GET  /merchants?month=2026-07
 GET  /merchant-rules
 GET  /recurring
+GET  /recurring/calendar?month=2026-08
 GET  /recurring/ignored
 GET  /expenses/largest?month=2026-07
 GET  /anomalies?month=2026-07
@@ -223,6 +225,9 @@ multiple months, so it becomes useful after importing a few statements. Upload
 Hide a recurring merchant from the dashboard or `POST /recurring/ignored` when a
 detected repeat charge should not affect forecasts or budget recommendations;
 restore it later with `DELETE /recurring/ignored/{id}`.
+Use the Bill Calendar panel or `GET /recurring/calendar` to see expected
+recurring charges by date; without a month it shows the month after the latest
+imported statement.
 
 Dismiss an anomaly from the dashboard or `POST /anomalies/{id}/ignore` when a
 large expense is expected. Dismissed transactions are hidden from anomaly alerts,

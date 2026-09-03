@@ -133,13 +133,19 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(page.getByText("Online")).toBeVisible();
   await page.getByLabel("Month").selectOption("2026-07");
   const recurringPanel = page.getByTestId("recurring-panel");
+  const billPanel = page.getByTestId("bill-calendar-panel");
+  await expect(billPanel.getByText("Gym Membership")).toBeVisible();
+  await expect(billPanel.locator(".bill-calendar-total strong")).toHaveText("$44.67");
   await expect(recurringPanel.getByText("Gym Membership")).toBeVisible();
   await recurringPanel.getByLabel("Hide recurring charge for Gym Membership").click();
   await expect(page.getByTestId("status-message")).toHaveText("Hid recurring charge for Gym Membership.");
   await expect(recurringPanel.getByLabel("Restore recurring charge for Gym Membership")).toBeVisible();
+  await expect(billPanel.getByText("Gym Membership")).toHaveCount(0);
+  await expect(billPanel.getByText("No expected bills for 2026-09.")).toBeVisible();
   await recurringPanel.getByLabel("Restore recurring charge for Gym Membership").click();
   await expect(page.getByTestId("status-message")).toHaveText("Restored recurring charge for Gym Membership.");
   await expect(recurringPanel.getByText("Gym Membership")).toBeVisible();
+  await expect(billPanel.getByText("Gym Membership")).toBeVisible();
   await expect(transactionsPanel.getByText("Cash Lunch")).toBeVisible();
 
   await transactionsPanel.getByLabel("Edit Cash Lunch").click();

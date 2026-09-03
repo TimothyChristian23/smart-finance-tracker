@@ -62,6 +62,7 @@ from app.database import (
     record_ask_history,
     restore_backup,
     recurring_charges,
+    recurring_bill_calendar,
     reset_all_data,
     reset_db,
     save_csv_import_preset,
@@ -315,6 +316,23 @@ class RecurringChargeResponse(BaseModel):
     next_expected_date: str
     cadence: str
     confidence: float
+
+
+class RecurringCalendarItemResponse(BaseModel):
+    date: str
+    merchant: str
+    merchant_key: str
+    category: str
+    amount: float
+    cadence: str
+    confidence: float
+
+
+class RecurringCalendarResponse(BaseModel):
+    month: str | None = None
+    total_expected: float
+    item_count: int
+    items: list[RecurringCalendarItemResponse]
 
 
 class RecurringIgnoreRequest(BaseModel):
@@ -897,6 +915,11 @@ async def largest(month: str | None = None, limit: int = 10) -> list[dict]:
     return largest_expenses(month=validate_month(month), limit=bounded_limit(limit))
 
 
+@app.get("/recurring/calendar", response_model=RecurringCalendarResponse)
+async def recurring_calendar(month: str | None = None, limit: int = 20) -> dict:
+    return recurring_bill_calendar(month=validate_month(month), limit=bounded_limit(limit, maximum=100))
+
+
 @app.get("/recurring", response_model=list[RecurringChargeResponse])
 async def recurring(limit: int = 10) -> list[dict]:
     return recurring_charges(limit=bounded_limit(limit))
@@ -984,6 +1007,31 @@ def answer_finance_question(question: str) -> AskResponse:
             month=report["month"],
             intent="monthly_insights",
             data=[report],
+        )
+
+    if looks_like_bill_calendar_question(normalized):
+        calendar = recurring_bill_calendar(month=month, limit=8)
+        if not calendar["items"]:
+            return AskResponse(
+                answer=f"I do not have expected recurring bills for {format_month_label(calendar['month'])}.",
+                month=calendar["month"],
+                intent="recurring_bill_calendar",
+                data=[],
+            )
+
+        lead = calendar["items"][0]
+        return AskResponse(
+            answer=(
+                f"For {format_month_label(calendar['month'])}, I expect {calendar['item_count']} recurring bill"
+                f"{'' if calendar['item_count'] == 1 else 's'} totaling "
+                f"{format_money(calendar['total_expected'])}. Next up is {lead['merchant']} "
+                f"on {lead['date']} for {format_money(lead['amount'])}."
+            ),
+            amount=calendar["total_expected"],
+            categories=[item["category"] for item in calendar["items"]],
+            month=calendar["month"],
+            intent="recurring_bill_calendar",
+            data=calendar["items"],
         )
 
     if looks_like_forecast_question(normalized):
@@ -2069,6 +2117,13 @@ def looks_like_forecast_question(question: str) -> bool:
     return (
         has_any(question, ["forecast", "project", "projected", "projection", "pace", "run rate", "expected"])
         or "rest of the month" in question
+    )
+
+
+def looks_like_bill_calendar_question(question: str) -> bool:
+    return (
+        has_any(question, ["bill", "bills", "due", "calendar"])
+        and has_any(question, ["due", "calendar", "upcoming", "expected", "next"])
     )
 
 

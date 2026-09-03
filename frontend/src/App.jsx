@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookmarkPlus,
   CalendarClock,
+  CalendarDays,
   Check,
   ClipboardList,
   CircleDollarSign,
@@ -48,6 +49,7 @@ export default function App() {
   const [summary, setSummary] = useState(emptySummary());
   const [insights, setInsights] = useState(emptyInsights());
   const [forecast, setForecast] = useState(emptyForecast());
+  const [recurringCalendar, setRecurringCalendar] = useState(emptyRecurringCalendar());
   const [transactions, setTransactions] = useState([]);
   const [anomalies, setAnomalies] = useState([]);
   const [months, setMonths] = useState([]);
@@ -128,6 +130,7 @@ export default function App() {
         csvPresetsPayload,
         budgetPayload,
         budgetRecommendationPayload,
+        recurringCalendarPayload,
         recurringPayload,
         ignoredRecurringPayload,
         ignoredAnomaliesPayload,
@@ -157,6 +160,7 @@ export default function App() {
         request("/csv-mapping-presets"),
         request(`/budgets${queryString({ month: activeMonth })}`),
         request(`/budgets/recommendations${queryString({ month: activeMonth, limit: 6 })}`),
+        request("/recurring/calendar?limit=8"),
         request("/recurring?limit=6"),
         request("/recurring/ignored"),
         request("/anomalies/ignored"),
@@ -182,6 +186,7 @@ export default function App() {
       setCsvPresets(csvPresetsPayload);
       setBudgets(budgetPayload);
       setBudgetRecommendations(budgetRecommendationPayload);
+      setRecurringCalendar(recurringCalendarPayload);
       setRecurringCharges(recurringPayload);
       setIgnoredRecurring(ignoredRecurringPayload);
       setIgnoredAnomalies(ignoredAnomaliesPayload);
@@ -841,6 +846,11 @@ export default function App() {
           <ForecastSummary forecast={forecast} />
         </section>
 
+        <section className="panel bill-calendar-panel" data-testid="bill-calendar-panel">
+          <PanelTitle icon={<CalendarDays size={18} />} title="Bill Calendar" detail={recurringCalendar.month || "Upcoming"} />
+          <BillCalendar calendar={recurringCalendar} />
+        </section>
+
         <section className="panel budget-panel">
           <PanelTitle icon={<Target size={18} />} title="Budgets" detail={month || "No month"} />
           <BudgetForm
@@ -1151,6 +1161,33 @@ function ForecastSummary({ forecast }) {
       <div className="forecast-notes">
         {(forecast.notes || []).slice(0, 4).map((note) => (
           <p key={note}>{note}</p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BillCalendar({ calendar }) {
+  const items = calendar.items || [];
+  if (!calendar.month) return <p className="empty">No recurring bills yet.</p>;
+  if (!items.length) return <p className="empty">No expected bills for {calendar.month}.</p>;
+
+  return (
+    <div className="bill-calendar">
+      <div className="bill-calendar-total">
+        <span>Expected</span>
+        <strong>{money(calendar.total_expected)}</strong>
+      </div>
+      <div className="list">
+        {items.map((item) => (
+          <div className="list-row bill-calendar-row" key={`${item.date}-${item.merchant}`}>
+            <time dateTime={item.date}>{item.date.slice(5)}</time>
+            <div>
+              <strong>{item.merchant}</strong>
+              <span>{item.category} | {item.cadence}</span>
+            </div>
+            <b>{money(item.amount)}</b>
+          </div>
         ))}
       </div>
     </div>
@@ -2166,6 +2203,15 @@ function emptyForecast() {
     upcoming_recurring_total: 0,
     upcoming_recurring: [],
     notes: [],
+  };
+}
+
+function emptyRecurringCalendar() {
+  return {
+    month: null,
+    total_expected: 0,
+    item_count: 0,
+    items: [],
   };
 }
 

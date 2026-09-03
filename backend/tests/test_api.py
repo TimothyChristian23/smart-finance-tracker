@@ -1407,6 +1407,23 @@ def test_recurring_endpoint_detects_monthly_charges():
     assert netflix["next_expected_date"] == "2026-08-03"
 
 
+def test_recurring_bill_calendar_projects_expected_bills_by_month():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    response = client.get("/recurring/calendar?month=2026-08")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["month"] == "2026-08"
+    assert payload["total_expected"] == 60.66
+    assert [item["merchant"] for item in payload["items"]] == ["Netflix Subscription", "Gym Membership"]
+    assert [item["date"] for item in payload["items"]] == ["2026-08-03", "2026-08-15"]
+    assert payload["items"][0]["amount"] == 15.99
+
+    future = client.get("/recurring/calendar?month=2026-09").json()
+    assert [item["date"] for item in future["items"]] == ["2026-09-03", "2026-09-15"]
+
+
 def test_recurring_ignore_hides_merchants_from_detection_and_forecast():
     client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
 
@@ -1427,6 +1444,10 @@ def test_recurring_ignore_hides_merchants_from_detection_and_forecast():
     forecast = client.get("/forecast/monthly?month=2026-08").json()
     assert forecast["upcoming_recurring_total"] == 44.67
     assert {item["merchant"] for item in forecast["upcoming_recurring"]} == {"Gym Membership"}
+
+    calendar = client.get("/recurring/calendar?month=2026-08").json()
+    assert calendar["total_expected"] == 44.67
+    assert {item["merchant"] for item in calendar["items"]} == {"Gym Membership"}
 
     restore_response = client.delete(f"/recurring/ignored/{hidden['id']}")
     assert restore_response.status_code == 200
@@ -1557,6 +1578,20 @@ def test_ask_handles_forecast_questions():
     assert "projected spending is $60.66" in payload["answer"]
     assert "Upcoming recurring charges add $60.66." in payload["answer"]
     assert payload["data"][0]["upcoming_recurring_total"] == 60.66
+
+
+def test_ask_handles_recurring_bill_calendar_questions():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    response = client.post("/ask", json={"question": "What bills are due in August 2026?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "recurring_bill_calendar"
+    assert payload["amount"] == 60.66
+    assert payload["month"] == "2026-08"
+    assert "Next up is Netflix Subscription on 2026-08-03" in payload["answer"]
+    assert [item["merchant"] for item in payload["data"]] == ["Netflix Subscription", "Gym Membership"]
 
 
 def test_ask_returns_cited_evidence_for_broad_questions():

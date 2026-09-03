@@ -1883,6 +1883,39 @@ def recurring_charges(limit: int = 10, min_occurrences: int = 3) -> list[dict]:
     )[:limit]
 
 
+def recurring_bill_calendar(month: str | None = None, limit: int = 20) -> dict:
+    """Return expected recurring charges for a calendar month."""
+    calendar_month = month or _next_month(_latest_month())
+    if calendar_month is None:
+        return {
+            "month": None,
+            "total_expected": 0,
+            "item_count": 0,
+            "items": [],
+        }
+
+    projected = _projected_recurring_charges(calendar_month, coverage_date=None)
+    items = [
+        {
+            "date": charge["next_expected_date"],
+            "merchant": charge["merchant"],
+            "merchant_key": charge["merchant_key"],
+            "category": charge["category"],
+            "amount": charge["average_amount"],
+            "cadence": charge["cadence"],
+            "confidence": charge["confidence"],
+        }
+        for charge in projected
+    ][:limit]
+
+    return {
+        "month": calendar_month,
+        "total_expected": round(sum(item["amount"] for item in items), 2),
+        "item_count": len(items),
+        "items": items,
+    }
+
+
 def monthly_insights(month: str | None = None) -> dict:
     """Compose a concise monthly report from deterministic finance signals."""
     insight_month = month or _latest_month()
@@ -2707,6 +2740,16 @@ def _previous_month(month: str) -> str:
     return f"{current.year}-{current.month - 1:02d}"
 
 
+def _next_month(month: str | None) -> str | None:
+    if month is None:
+        return None
+
+    current = date.fromisoformat(f"{month}-01")
+    if current.month == 12:
+        return f"{current.year + 1}-01"
+    return f"{current.year}-{current.month + 1:02d}"
+
+
 def _month_bounds(month: str) -> tuple[date, date]:
     start = date.fromisoformat(f"{month}-01")
     if start.month == 12:
@@ -2729,14 +2772,50 @@ def _latest_transaction_date(month: str) -> str | None:
 
 
 def _upcoming_recurring_charges(month: str, coverage_date: date | None) -> list[dict]:
-    start_date, end_date = _month_bounds(month)
-    cutoff = coverage_date or (start_date - timedelta(days=1))
-    charges = []
+    return _projected_recurring_charges(month, coverage_date=coverage_date)
+
+
+def _projected_recurring_charges(month: str, coverage_date: date | None = None) -> list[dict]:
+    projected = []
     for charge in recurring_charges(limit=100):
-        expected_date = date.fromisoformat(charge["next_expected_date"])
-        if start_date <= expected_date < end_date and expected_date > cutoff:
-            charges.append(charge)
-    return sorted(charges, key=lambda item: item["next_expected_date"])
+        for expected_date in _project_recurring_dates_for_month(charge, month, after=coverage_date):
+            projected.append({**charge, "next_expected_date": expected_date.isoformat()})
+    return sorted(projected, key=lambda item: (item["next_expected_date"], item["merchant"]))
+
+
+def _project_recurring_dates_for_month(charge: dict, month: str, after: date | None = None) -> list[date]:
+    start_date, end_date = _month_bounds(month)
+    expected_date = date.fromisoformat(charge["next_expected_date"])
+    expected_dates = []
+
+    while expected_date < start_date:
+        expected_date = _advance_recurring_date(expected_date, charge["cadence"])
+
+    while expected_date < end_date:
+        if after is None or expected_date > after:
+            expected_dates.append(expected_date)
+        expected_date = _advance_recurring_date(expected_date, charge["cadence"])
+
+    return expected_dates
+
+
+def _advance_recurring_date(value: date, cadence: str) -> date:
+    if cadence == "weekly":
+        return value + timedelta(days=7)
+    if cadence == "biweekly":
+        return value + timedelta(days=14)
+    if cadence == "quarterly":
+        return _add_months(value, 3)
+    return _add_months(value, 1)
+
+
+def _add_months(value: date, month_delta: int) -> date:
+    total_months = (value.year * 12) + (value.month - 1) + month_delta
+    year = total_months // 12
+    month = (total_months % 12) + 1
+    month_start, next_month_start = _month_bounds(f"{year}-{month:02d}")
+    last_day = (next_month_start - timedelta(days=1)).day
+    return date(month_start.year, month_start.month, min(value.day, last_day))
 
 
 def _forecast_budget_status(
