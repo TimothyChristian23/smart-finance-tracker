@@ -1180,6 +1180,10 @@ h2 {
   white-space: nowrap;
 }
 
+.preview-ai-callout {
+  margin-top: 10px;
+}
+
 .category-review-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

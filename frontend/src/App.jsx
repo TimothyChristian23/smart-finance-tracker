@@ -45,7 +45,7 @@ import {
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const DEFAULT_QUESTION = "How much did I spend on food in 2026-07?";
 const AI_CATEGORY_WARNING_TEXT = (
-  "AI Assist sends transaction descriptions, cleaned merchant names, dates, amounts, current categories, local suggestions, local reasons, and account labels to OpenAI for category suggestions. It does not apply changes automatically."
+  "AI Assist sends transaction descriptions, cleaned merchant names, dates, amounts, current categories, local suggestions, local reasons, and account labels to OpenAI for category suggestions. It can update unsaved preview categories, but it never imports data or changes existing transactions automatically."
 );
 
 export default function App() {
@@ -320,6 +320,39 @@ export default function App() {
 
   function handlePreviewCategoryChange(index, category) {
     setUploadPreview((preview) => previewWithRowCategory(preview, index, category));
+  }
+
+  async function handleAIPreviewCategories() {
+    if (!uploadPreview?.rows?.length) {
+      setUploadStatus("Preview a statement before using AI Assist.");
+      return;
+    }
+    if (!window.confirm(`${AI_CATEGORY_WARNING_TEXT}\n\nContinue?`)) return;
+
+    setBusy(true);
+    setUploadStatus("Getting AI category suggestions for preview...");
+    try {
+      const payload = await request("/transactions/preview/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: uploadPreview.rows }),
+      });
+      setUploadPreview({
+        ...uploadPreview,
+        rows: payload.rows,
+        categories: payload.categories,
+      });
+      setAiCategoryStatus({
+        enabled: payload.enabled,
+        model: payload.model,
+        message: `AI Assist updated ${payload.rows.length} preview row${payload.rows.length === 1 ? "" : "s"}.`,
+      });
+      setUploadStatus("AI updated preview categories. Review them before importing.");
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleAsk(event) {
@@ -626,11 +659,12 @@ export default function App() {
         }),
       });
       const transactionText = payload.updated_transactions === 1 ? "transaction" : "transactions";
-      setUploadStatus(payload.updated_transactions
+      const message = payload.updated_transactions
         ? `Saved ${payload.rule.category} rule for ${payload.rule.merchant} and updated ${payload.updated_transactions} ${transactionText}.`
-        : `Saved ${payload.rule.category} rule for ${payload.rule.merchant}.`);
+        : `Saved ${payload.rule.category} rule for ${payload.rule.merchant}.`;
       setRuleDraft({ ...emptyRuleDraft(), category: payload.rule.category });
       await refreshDashboard();
+      setUploadStatus(message);
     } catch (error) {
       setUploadStatus(error.message);
     } finally {
@@ -1021,7 +1055,10 @@ export default function App() {
           />
           {uploadPreview && (
             <ImportPreview
+              aiStatus={aiCategoryStatus}
+              busy={busy}
               categoryOptions={categoryOptions}
+              onAskAI={handleAIPreviewCategories}
               onCategoryChange={handlePreviewCategoryChange}
               preview={uploadPreview}
             />
@@ -1670,7 +1707,7 @@ function AccountSummaryList({ accounts }) {
   );
 }
 
-function ImportPreview({ categoryOptions, onCategoryChange, preview }) {
+function ImportPreview({ aiStatus, busy, categoryOptions, onAskAI, onCategoryChange, preview }) {
   const errors = preview.errors || [];
 
   return (
@@ -1679,6 +1716,22 @@ function ImportPreview({ categoryOptions, onCategoryChange, preview }) {
         <span>{preview.importable_count} importable</span>
         <span>{preview.duplicate_count} duplicates</span>
         <span>{money(preview.total_spending)} spending</span>
+      </div>
+      <div className="ai-review-callout preview-ai-callout">
+        <div>
+          <strong>AI Assist</strong>
+          <span>{AI_CATEGORY_WARNING_TEXT}</span>
+          <small>{aiStatus.enabled ? `Ready: ${aiStatus.model}` : aiStatus.message}</small>
+        </div>
+        <button
+          className="ghost-button"
+          disabled={busy || !preview.rows?.length || !aiStatus.enabled}
+          onClick={onAskAI}
+          type="button"
+        >
+          <Sparkles size={15} />
+          AI Assist
+        </button>
       </div>
       {!!errors.length && (
         <div className="preview-errors">

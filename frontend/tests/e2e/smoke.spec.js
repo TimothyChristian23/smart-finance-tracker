@@ -62,6 +62,9 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
     `Previewed ${sampleTransactionCount} rows from sample_transactions.csv.`,
   );
   await expect(importPanel.getByText(`${sampleTransactionCount} importable`)).toBeVisible();
+  const previewPanel = importPanel.locator(".import-preview");
+  await expect(previewPanel.getByText("AI Assist sends transaction descriptions")).toBeVisible();
+  await expect(previewPanel.getByRole("button", { name: "AI Assist" })).toBeDisabled();
   await importPanel.getByLabel("Category for Trader Joes").first().selectOption("Dining");
   await expect(importPanel.getByText("Manual review: Category selected during import review.")).toBeVisible();
 

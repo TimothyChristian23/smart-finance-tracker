@@ -19,6 +19,7 @@ from app.ai_categorization import (
     AICategorizationNotConfigured,
     ai_categorization_status,
     suggest_category_reviews_with_ai,
+    suggest_preview_rows_with_ai,
 )
 from app.categorization import (
     CATEGORY_OPTIONS,
@@ -156,6 +157,10 @@ class ReviewedImportRequest(BaseModel):
     rows: list[ReviewedImportRowRequest] = Field(..., min_length=1, max_length=5000)
 
 
+class AIPreviewCategoryRequest(BaseModel):
+    rows: list[ImportPreviewRow] = Field(..., min_length=1, max_length=5000)
+
+
 class UploadHistoryResponse(BaseModel):
     id: int
     filename: str
@@ -278,6 +283,14 @@ class AICategoryReviewResponse(BaseModel):
     model: str
     warning: str
     suggestions: list[CategoryReviewResponse]
+
+
+class AIPreviewCategoryResponse(BaseModel):
+    enabled: bool
+    model: str
+    warning: str
+    categories: list[ImportPreviewCategory]
+    rows: list[ImportPreviewRow]
 
 
 class CategoryUpdateRequest(BaseModel):
@@ -598,7 +611,8 @@ CSV_MAPPING_FIELDS = [
 AI_CATEGORY_WARNING = (
     "AI Assist sends transaction descriptions, cleaned merchant names, dates, amounts, "
     "current categories, local category suggestions, local reasons, and account labels "
-    "to OpenAI for category suggestions. It does not apply changes automatically."
+    "to OpenAI for category suggestions. It can update unsaved preview categories, "
+    "but it never imports data or changes existing transactions automatically."
 )
 
 
@@ -647,6 +661,25 @@ async def preview_transactions(
         "filename": filename,
         "file_type": file_type,
         **preview,
+    }
+
+
+@app.post("/transactions/preview/ai", response_model=AIPreviewCategoryResponse)
+def ai_preview_categories(request: AIPreviewCategoryRequest) -> dict:
+    """Suggest categories for unsaved import preview rows after user confirmation."""
+    status = ai_categorization_status()
+    rows = validate_ai_preview_rows(request.rows)
+    try:
+        suggested_rows = suggest_preview_rows_with_ai(rows)
+    except AICategorizationNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except AICategorizationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        **status,
+        "warning": AI_CATEGORY_WARNING,
+        "categories": summarize_preview_categories(suggested_rows),
+        "rows": suggested_rows,
     }
 
 
@@ -1972,6 +2005,53 @@ def apply_account_label(rows: list[dict], account_name: str | None) -> None:
         return
     for row in rows:
         row["account_name"] = account_name
+
+
+def validate_ai_preview_rows(rows: list[ImportPreviewRow]) -> list[dict]:
+    validated_rows = []
+    for index, row in enumerate(rows, start=1):
+        try:
+            amount_cents = dollars_to_cents(row.amount)
+            category = validate_category(row.category)
+            suggested_category = validate_category(row.suggested_category) if row.suggested_category else category
+            validated_rows.append({
+                "date": validate_transaction_date(row.date),
+                "description": validate_transaction_description(row.description),
+                "amount": cents_to_dollars(amount_cents),
+                "category": category,
+                "suggested_category": suggested_category,
+                "category_confidence": row.category_confidence,
+                "category_confidence_label": row.category_confidence_label,
+                "category_source": row.category_source,
+                "category_source_label": row.category_source_label,
+                "category_reason": row.category_reason,
+                "matched_terms": [term[:60] for term in row.matched_terms[:10]],
+                "source_file": validate_source_filename(row.source_file) if row.source_file else None,
+                "account_name": validate_account_name(row.account_name),
+                "duplicate": row.duplicate,
+            })
+        except HTTPException as exc:
+            raise HTTPException(status_code=400, detail=f"rows[{index}]: {exc.detail}") from exc
+    return validated_rows
+
+
+def summarize_preview_categories(rows: list[dict]) -> list[dict]:
+    totals: dict[str, dict] = {}
+    for row in rows:
+        amount_cents = dollars_to_cents(row["amount"])
+        if amount_cents >= 0:
+            continue
+        current = totals.setdefault(row["category"], {"category": row["category"], "total_cents": 0, "transaction_count": 0})
+        current["total_cents"] += abs(amount_cents)
+        current["transaction_count"] += 1
+    return [
+        {
+            "category": item["category"],
+            "total": cents_to_dollars(item["total_cents"]),
+            "transaction_count": item["transaction_count"],
+        }
+        for item in sorted(totals.values(), key=lambda item: item["total_cents"], reverse=True)
+    ]
 
 
 def reviewed_import_rows(

@@ -73,6 +73,29 @@ def suggest_category_reviews_with_ai(review_items: list[dict]) -> list[dict]:
     return ai_items
 
 
+def suggest_preview_rows_with_ai(rows: list[dict]) -> list[dict]:
+    """Ask OpenAI for category suggestions for unsaved import preview rows."""
+    api_key = openai_api_key()
+    if not api_key:
+        raise AICategorizationNotConfigured("AI categorization is disabled. Set OPENAI_API_KEY to enable it.")
+
+    candidates = _candidate_preview_rows(rows)
+    if not candidates:
+        return rows
+
+    categories = expense_categories()
+    payload = _category_suggestion_payload(candidates, categories, ai_category_model())
+    response = _post_openai_response(payload, api_key=api_key, timeout=20)
+    suggestions = _parse_response_suggestions(response)
+    by_candidate_id = _validated_suggestions(suggestions, candidates, categories)
+
+    updated_rows = []
+    for index, row in enumerate(rows, start=1):
+        suggestion = by_candidate_id.get(index)
+        updated_rows.append(_preview_row_from_ai(row, suggestion) if suggestion else row)
+    return updated_rows
+
+
 def openai_api_key() -> str:
     """Read the OpenAI API key from the server environment."""
     return os.getenv("OPENAI_API_KEY", "").strip()
@@ -107,6 +130,25 @@ def _candidate_transactions(review_items: list[dict]) -> list[dict]:
             "current_category": item["current_category"],
             "local_suggested_category": item["suggested_category"],
             "local_reason": item["reason"],
+        })
+    return candidates
+
+
+def _candidate_preview_rows(rows: list[dict]) -> list[dict]:
+    candidates = []
+    for index, row in enumerate(rows, start=1):
+        if row["amount"] >= 0 or row.get("duplicate"):
+            continue
+        candidates.append({
+            "id": index,
+            "date": row["date"],
+            "description": row["description"],
+            "merchant": clean_merchant_description(row["description"]),
+            "amount": round(abs(row["amount"]), 2),
+            "account_name": row.get("account_name") or "",
+            "current_category": row["category"],
+            "local_suggested_category": row.get("suggested_category") or row["category"],
+            "local_reason": row.get("category_reason") or "",
         })
     return candidates
 
@@ -292,4 +334,19 @@ def _review_item_from_ai(item: dict, suggestion: dict) -> dict:
         "matched_terms": suggestion["matched_terms"],
         "reason": suggestion["reason"],
         "action": "update" if suggested_category != current_category else "review",
+    }
+
+
+def _preview_row_from_ai(row: dict, suggestion: dict) -> dict:
+    confidence = round(suggestion["confidence"], 2)
+    return {
+        **row,
+        "category": suggestion["category"],
+        "suggested_category": suggestion["category"],
+        "category_confidence": confidence,
+        "category_confidence_label": confidence_label(confidence),
+        "category_source": AI_CATEGORY_SOURCE,
+        "category_source_label": explain_category_source(AI_CATEGORY_SOURCE),
+        "category_reason": suggestion["reason"],
+        "matched_terms": suggestion["matched_terms"],
     }

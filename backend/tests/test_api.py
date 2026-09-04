@@ -1262,6 +1262,10 @@ def test_category_review_queue_suggests_uncertain_updates():
 
 def test_ai_categorization_status_and_disabled_review_guard():
     client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+    preview = client.post(
+        "/transactions/preview",
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    ).json()
 
     status = client.get("/ai/categorization/status")
     assert status.status_code == 200
@@ -1274,6 +1278,10 @@ def test_ai_categorization_status_and_disabled_review_guard():
     response = client.post("/categories/review/ai?month=2026-07")
     assert response.status_code == 400
     assert response.json()["detail"] == "AI categorization is disabled. Set OPENAI_API_KEY to enable it."
+
+    disabled_preview = client.post("/transactions/preview/ai", json={"rows": preview["rows"]})
+    assert disabled_preview.status_code == 400
+    assert disabled_preview.json()["detail"] == "AI categorization is disabled. Set OPENAI_API_KEY to enable it."
 
 
 def test_ai_category_review_uses_mocked_openai_response(monkeypatch):
@@ -1324,6 +1332,60 @@ def test_ai_category_review_uses_mocked_openai_response(monkeypatch):
     assert by_description["Gym Membership"]["category_source_label"] == "AI suggestion"
     assert by_description["Gym Membership"]["confidence_label"] == "high"
     assert by_description["Random Shop"]["suggested_category"] == "Shopping"
+
+
+def test_ai_preview_categories_updates_unsaved_rows_and_totals(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_CATEGORY_MODEL", "test-model")
+    preview = client.post(
+        "/transactions/preview",
+        files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")},
+    ).json()
+    captured = {}
+
+    def fake_openai_response(payload, api_key, timeout):
+        captured["payload"] = payload
+        captured["api_key"] = api_key
+        captured["timeout"] = timeout
+        request_data = json.loads(payload["input"][1]["content"][0]["text"])
+        suggestions = []
+        for row in request_data["transactions"]:
+            suggestions.append({
+                "transaction_id": row["id"],
+                "category": "Dining" if row["merchant"] == "Amazon Marketplace" else row["current_category"],
+                "confidence": 0.88,
+                "reason": f"{row['merchant']} was checked during preview.",
+                "matched_terms": [row["merchant"]],
+            })
+        return {"output_text": json.dumps({"suggestions": suggestions})}
+
+    monkeypatch.setattr(ai_categorization, "_post_openai_response", fake_openai_response)
+
+    response = client.post("/transactions/preview/ai", json={"rows": preview["rows"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is True
+    assert payload["model"] == "test-model"
+    assert "to OpenAI" in payload["warning"]
+    assert captured["api_key"] == "test-key"
+    assert captured["timeout"] == 20
+    assert captured["payload"]["store"] is False
+    request_data = json.loads(captured["payload"]["input"][1]["content"][0]["text"])
+    assert "Income" not in request_data["allowed_categories"]
+    assert all(item["amount"] > 0 for item in request_data["transactions"])
+    assert "Payroll Deposit" not in {item["merchant"] for item in request_data["transactions"]}
+
+    amazon = next(row for row in payload["rows"] if row["description"] == "Amazon Marketplace")
+    assert amazon["category"] == "Dining"
+    assert amazon["category_source"] == "ai_suggestion"
+    assert amazon["category_source_label"] == "AI suggestion"
+    assert amazon["category_confidence"] == 0.88
+
+    categories = {item["category"]: item["total"] for item in payload["categories"]}
+    assert categories["Dining"] == 124.77
+    assert categories["Shopping"] == 899.0
+    assert client.get("/summary?month=2026-07").json()["transaction_count"] == 0
 
 
 def test_pdf_upload_imports_text_statement_rows():

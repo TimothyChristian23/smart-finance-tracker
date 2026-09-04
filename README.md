@@ -20,7 +20,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Import quality report for duplicate skips, category review needs, anomalies, and recurring detections
 - SQLite transaction storage
 - Explainable starter categorization with confidence, source, and matched merchant signals
-- Optional OpenAI-powered AI Assist for review-only category suggestions
+- Optional OpenAI-powered AI Assist for import preview and review-only category suggestions
 - Editable transaction categories
 - Category review queue with confidence-scored suggestions
 - Saved normalized merchant rules that apply to future imports
@@ -151,6 +151,7 @@ POST /categories/review/ai?month=2026-07
 GET  /csv-mapping-presets
 POST /transactions
 POST /transactions/preview
+POST /transactions/preview/ai
 POST /transactions/import-reviewed
 GET  /transactions?month=2026-07&category=Dining&search=coffee
 GET  /transactions/export?month=2026-07
@@ -287,13 +288,14 @@ Merchant rules can also be created from the dashboard or `PUT /merchant-rules`;
 turn on `apply_existing` to recategorize matching transactions already in SQLite.
 
 AI Assist can optionally ask OpenAI for category suggestions for the current
-category review queue. Set `OPENAI_API_KEY` on the backend to enable it, and
-optionally override `OPENAI_CATEGORY_MODEL` from the default `gpt-5-nano`.
-The dashboard shows a warning and asks for confirmation before sending review
-candidates to OpenAI. The sent fields are transaction descriptions, cleaned
-merchant names, dates, amounts, current categories, local suggestions, local
-reasons, and account labels. AI Assist returns suggestions only; users must
-apply any category change themselves.
+import preview or category review queue. Set `OPENAI_API_KEY` on the backend to
+enable it, and optionally override `OPENAI_CATEGORY_MODEL` from the default
+`gpt-5-nano`. The dashboard shows a warning and asks for confirmation before
+sending candidates to OpenAI. The sent fields are transaction descriptions,
+cleaned merchant names, dates, amounts, current categories, local suggestions,
+local reasons, and account labels. Preview suggestions update only unsaved
+preview rows; users still choose whether to import reviewed rows or apply
+category review changes.
 
 ## Notes
 
