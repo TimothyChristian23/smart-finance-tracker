@@ -412,6 +412,31 @@ def test_upload_history_records_import_counts_and_duplicates():
     assert uploads[1]["duplicates_skipped"] == 0
 
 
+def test_import_quality_report_summarizes_uploaded_statement_health():
+    empty = client.get("/imports/quality?month=2026-07").json()
+    assert empty["status"] == "empty"
+    assert empty["transaction_count"] == 0
+    assert empty["notes"] == ["No imported transactions found for this view."]
+
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.get("/imports/quality?month=2026-07")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["month"] == "2026-07"
+    assert payload["status"] == "needs_review"
+    assert payload["transaction_count"] == 11
+    assert payload["upload_count"] == 2
+    assert payload["duplicates_skipped"] == 11
+    assert payload["latest_upload"]["imported_count"] == 0
+    assert payload["latest_upload"]["duplicates_skipped"] == 11
+    assert payload["anomaly_count"] >= 1
+    assert payload["anomalies"][0]["description"] == "One-Time Electronics Store"
+    assert any("duplicate" in note for note in payload["notes"])
+
+
 def test_transactions_filter_by_month_category_and_search():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
 

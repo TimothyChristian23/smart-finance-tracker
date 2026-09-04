@@ -17,6 +17,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Optional account labels for statement imports and transaction filtering
 - Account-level spending, income, and net summaries
 - Upload history with imported and duplicate counts
+- Import quality report for duplicate skips, category review needs, anomalies, and recurring detections
 - SQLite transaction storage
 - Explainable starter categorization with confidence, source, and matched merchant signals
 - Editable transaction categories
@@ -135,6 +136,7 @@ GET  /insights/monthly?month=2026-07
 GET  /forecast/monthly?month=2026-08
 GET  /months
 GET  /uploads
+GET  /imports/quality?month=2026-07
 GET  /csv-mapping-presets
 POST /transactions
 POST /transactions/preview
@@ -218,6 +220,9 @@ Use the Privacy panel Restore control or `POST /data/import` with a backup JSON
 file and `confirmation=RESTORE` to replace local data from a backup.
 The dashboard Privacy panel can reset all local app records after typing `RESET`;
 the API requires the same confirmation with `DELETE /data?confirmation=RESET`.
+The Import Quality panel and `GET /imports/quality` summarize whether the current
+view has duplicate skips, category review work, active anomalies, or recurring
+patterns that should be understood before relying on the data.
 
 Recurring charge detection needs the same normalized merchant to appear across
 multiple months, so it becomes useful after importing a few statements. Upload

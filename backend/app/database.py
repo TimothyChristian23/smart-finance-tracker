@@ -1916,6 +1916,41 @@ def recurring_bill_calendar(month: str | None = None, limit: int = 20) -> dict:
     }
 
 
+def import_quality_report(month: str | None = None) -> dict:
+    """Summarize import trust signals for a month or the full local dataset."""
+    summary = monthly_summary(month=month)
+    uploads = _uploads_for_report_month(list_uploads(limit=100000), month)
+    review_items = category_review_queue(month=month, limit=500)
+    anomalies = detect_anomalies(limit=500, month=month)
+    recurring_items = recurring_charges(limit=500)
+    other_total = next(
+        (item["total"] for item in summary["categories"] if item["category"] == "Other"),
+        0,
+    )
+
+    report = {
+        "month": month,
+        "status": _import_quality_status(
+            transaction_count=summary["transaction_count"],
+            review_count=len(review_items),
+            anomaly_count=len(anomalies),
+        ),
+        "transaction_count": summary["transaction_count"],
+        "upload_count": len(uploads),
+        "duplicates_skipped": sum(item["duplicates_skipped"] for item in uploads),
+        "review_count": len(review_items),
+        "anomaly_count": len(anomalies),
+        "recurring_count": len(recurring_items),
+        "other_total": other_total,
+        "latest_upload": uploads[0] if uploads else None,
+        "review_items": review_items[:3],
+        "anomalies": anomalies[:3],
+        "recurring_charges": recurring_items[:3],
+    }
+    report["notes"] = _import_quality_notes(report)
+    return report
+
+
 def monthly_insights(month: str | None = None) -> dict:
     """Compose a concise monthly report from deterministic finance signals."""
     insight_month = month or _latest_month()
@@ -2748,6 +2783,65 @@ def _next_month(month: str | None) -> str | None:
     if current.month == 12:
         return f"{current.year + 1}-01"
     return f"{current.year}-{current.month + 1:02d}"
+
+
+def _uploads_for_report_month(uploads: list[dict], month: str | None) -> list[dict]:
+    if month is None:
+        return uploads
+
+    month_start, month_end = _month_bounds(month)
+    matching_uploads = []
+    for upload in uploads:
+        first_date = upload["first_transaction_date"]
+        last_date = upload["last_transaction_date"]
+        if first_date is None or last_date is None:
+            continue
+
+        upload_start = date.fromisoformat(first_date)
+        upload_end = date.fromisoformat(last_date)
+        if upload_start < month_end and upload_end >= month_start:
+            matching_uploads.append(upload)
+    return matching_uploads
+
+
+def _import_quality_status(transaction_count: int, review_count: int, anomaly_count: int) -> str:
+    if transaction_count == 0:
+        return "empty"
+    if review_count or anomaly_count:
+        return "needs_review"
+    return "ready"
+
+
+def _import_quality_notes(report: dict) -> list[str]:
+    if report["transaction_count"] == 0:
+        return ["No imported transactions found for this view."]
+
+    notes = [
+        f"{report['transaction_count']} transaction{'' if report['transaction_count'] == 1 else 's'} available for this view."
+    ]
+    if report["latest_upload"]:
+        upload = report["latest_upload"]
+        notes.append(
+            f"Latest import: {upload['filename']} imported {upload['imported_count']} and skipped "
+            f"{upload['duplicates_skipped']} duplicate{'' if upload['duplicates_skipped'] == 1 else 's'}."
+        )
+    if report["review_count"]:
+        notes.append(
+            f"{report['review_count']} transaction{'' if report['review_count'] == 1 else 's'} need category review."
+        )
+    if report["anomaly_count"]:
+        notes.append(
+            f"{report['anomaly_count']} active anomal{'y' if report['anomaly_count'] == 1 else 'ies'} need a look."
+        )
+    if report["recurring_count"]:
+        notes.append(
+            f"{report['recurring_count']} recurring charge pattern{'' if report['recurring_count'] == 1 else 's'} detected."
+        )
+    if report["duplicates_skipped"] and not any("duplicate" in note for note in notes[1:]):
+        notes.append(
+            f"{report['duplicates_skipped']} duplicate{'' if report['duplicates_skipped'] == 1 else 's'} skipped across matching uploads."
+        )
+    return notes[:5]
 
 
 def _month_bounds(month: str) -> tuple[date, date]:

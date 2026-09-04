@@ -41,6 +41,7 @@ from app.database import (
     get_csv_import_preset,
     get_transaction,
     ignore_recurring_merchant,
+    import_quality_report,
     insert_transactions,
     ignore_anomaly_transaction,
     largest_expenses,
@@ -333,6 +334,23 @@ class RecurringCalendarResponse(BaseModel):
     total_expected: float
     item_count: int
     items: list[RecurringCalendarItemResponse]
+
+
+class ImportQualityReportResponse(BaseModel):
+    month: str | None = None
+    status: str
+    transaction_count: int
+    upload_count: int
+    duplicates_skipped: int
+    review_count: int
+    anomaly_count: int
+    recurring_count: int
+    other_total: float
+    latest_upload: UploadHistoryResponse | None = None
+    review_items: list[CategoryReviewResponse] = Field(default_factory=list)
+    anomalies: list[dict] = Field(default_factory=list)
+    recurring_charges: list[RecurringChargeResponse] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class RecurringIgnoreRequest(BaseModel):
@@ -704,6 +722,11 @@ async def accounts_summary(month: str | None = None) -> list[dict]:
 @app.get("/uploads", response_model=list[UploadHistoryResponse])
 async def uploads(limit: int = 20) -> list[dict]:
     return list_uploads(limit=bounded_limit(limit, maximum=100))
+
+
+@app.get("/imports/quality", response_model=ImportQualityReportResponse)
+async def import_quality(month: str | None = None) -> dict:
+    return import_quality_report(month=validate_month(month))
 
 
 @app.get("/csv-mapping-presets", response_model=list[CsvImportPresetResponse])

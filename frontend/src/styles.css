@@ -763,6 +763,93 @@ h2 {
   font-weight: 900;
 }
 
+.quality-report {
+  display: grid;
+  gap: 10px;
+}
+
+.quality-summary {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  padding: 10px;
+  background: #f8fafb;
+}
+
+.quality-summary strong,
+.quality-summary span {
+  display: block;
+}
+
+.quality-summary strong {
+  color: var(--ink);
+  font-size: 0.94rem;
+}
+
+.quality-summary span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.quality-ready {
+  border-color: rgba(33, 115, 70, 0.25);
+  background: #eef8f2;
+}
+
+.quality-needs_review {
+  border-color: rgba(164, 95, 32, 0.28);
+  background: #fff7ed;
+}
+
+.quality-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quality-stat {
+  min-height: 58px;
+  border: 1px solid var(--line);
+  padding: 9px;
+}
+
+.quality-stat small,
+.quality-stat b {
+  display: block;
+}
+
+.quality-stat small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.quality-stat b {
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+
+.quality-notes {
+  display: grid;
+  gap: 6px;
+}
+
+.quality-notes p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.quality-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
 .recurring-list,
 .anomaly-list {
   display: grid;
@@ -1530,6 +1617,10 @@ h2 {
 
   .bill-calendar-row {
     grid-template-columns: 42px minmax(0, 1fr) auto;
+  }
+
+  .quality-stats {
+    grid-template-columns: 1fr;
   }
 
   .recommendation-action {

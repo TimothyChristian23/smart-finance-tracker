@@ -69,6 +69,9 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(page.getByTestId("status-message")).toContainText(`Imported ${sampleTransactionCount} reviewed transactions`);
 
   await page.getByLabel("Month").selectOption("2026-07");
+  const qualityPanel = page.getByTestId("quality-panel");
+  await expect(qualityPanel.locator(".quality-summary strong")).toHaveText("Needs Review");
+  await expect(qualityPanel.getByText(/transactions available for this view/)).toBeVisible();
   const transactionsPanel = page.getByTestId("transactions-panel");
   await expect(transactionsPanel.getByText("Trader Joes")).toBeVisible();
 

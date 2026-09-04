@@ -49,6 +49,7 @@ export default function App() {
   const [summary, setSummary] = useState(emptySummary());
   const [insights, setInsights] = useState(emptyInsights());
   const [forecast, setForecast] = useState(emptyForecast());
+  const [importQuality, setImportQuality] = useState(emptyImportQuality());
   const [recurringCalendar, setRecurringCalendar] = useState(emptyRecurringCalendar());
   const [transactions, setTransactions] = useState([]);
   const [anomalies, setAnomalies] = useState([]);
@@ -135,6 +136,7 @@ export default function App() {
         ignoredRecurringPayload,
         ignoredAnomaliesPayload,
         uploadPayload,
+        importQualityPayload,
         askHistoryPayload,
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
@@ -165,6 +167,7 @@ export default function App() {
         request("/recurring/ignored"),
         request("/anomalies/ignored"),
         request("/uploads?limit=6"),
+        request(`/imports/quality${queryString({ month: activeMonth })}`),
         request("/ask/history?limit=5"),
       ]);
 
@@ -191,6 +194,7 @@ export default function App() {
       setIgnoredRecurring(ignoredRecurringPayload);
       setIgnoredAnomalies(ignoredAnomaliesPayload);
       setUploads(uploadPayload);
+      setImportQuality(importQualityPayload);
       setAskHistory(askHistoryPayload);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
     } catch (error) {
@@ -940,6 +944,11 @@ export default function App() {
           )}
         </section>
 
+        <section className="panel quality-panel" data-testid="quality-panel">
+          <PanelTitle icon={<Check size={18} />} title="Import Quality" detail={qualityStatusLabel(importQuality.status)} />
+          <ImportQualityReport report={importQuality} />
+        </section>
+
         <section className="panel uploads-panel">
           <PanelTitle icon={<History size={18} />} title="Import History" detail={`${uploads.length} recent`} />
           <UploadHistoryList uploads={uploads} />
@@ -1451,6 +1460,52 @@ function AnomalyList({ anomalies, busy, ignored, onIgnore, onRestore }) {
       )}
       {!anomalies.length && (
         <p className="empty">No active anomalies.</p>
+      )}
+    </div>
+  );
+}
+
+function ImportQualityReport({ report }) {
+  if (report.status === "empty") return <p className="empty">No imported transactions for this view.</p>;
+
+  const leadReview = report.review_items?.[0];
+  const stats = [
+    { label: "Transactions", value: report.transaction_count },
+    { label: "Review", value: report.review_count },
+    { label: "Anomalies", value: report.anomaly_count },
+    { label: "Other", value: money(report.other_total) },
+  ];
+
+  return (
+    <div className="quality-report">
+      <div className={`quality-summary quality-${report.status}`}>
+        <strong>{qualityStatusLabel(report.status)}</strong>
+        <span>
+          {report.upload_count} upload{report.upload_count === 1 ? "" : "s"} | {report.duplicates_skipped} duplicate
+          {report.duplicates_skipped === 1 ? "" : "s"} skipped
+        </span>
+      </div>
+      <div className="quality-stats">
+        {stats.map((stat) => (
+          <div className="quality-stat" key={stat.label}>
+            <small>{stat.label}</small>
+            <b>{stat.value}</b>
+          </div>
+        ))}
+      </div>
+      <div className="quality-notes">
+        {(report.notes || []).slice(0, 4).map((note) => (
+          <p key={note}>{note}</p>
+        ))}
+      </div>
+      {leadReview && (
+        <div className="list-row quality-action-row">
+          <div>
+            <strong>{leadReview.transaction.description}</strong>
+            <span>{leadReview.current_category} -&gt; {leadReview.suggested_category}</span>
+          </div>
+          <b>{Math.round(leadReview.confidence * 100)}%</b>
+        </div>
       )}
     </div>
   );
@@ -2206,6 +2261,25 @@ function emptyForecast() {
   };
 }
 
+function emptyImportQuality() {
+  return {
+    month: null,
+    status: "empty",
+    transaction_count: 0,
+    upload_count: 0,
+    duplicates_skipped: 0,
+    review_count: 0,
+    anomaly_count: 0,
+    recurring_count: 0,
+    other_total: 0,
+    latest_upload: null,
+    review_items: [],
+    anomalies: [],
+    recurring_charges: [],
+    notes: [],
+  };
+}
+
 function emptyRecurringCalendar() {
   return {
     month: null,
@@ -2213,6 +2287,12 @@ function emptyRecurringCalendar() {
     item_count: 0,
     items: [],
   };
+}
+
+function qualityStatusLabel(status) {
+  if (status === "ready") return "Ready";
+  if (status === "needs_review") return "Needs Review";
+  return "No Data";
 }
 
 function money(value) {
