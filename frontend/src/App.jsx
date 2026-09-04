@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Search,
   Shield,
+  Sparkles,
   Store,
   Tags,
   Target,
@@ -43,6 +44,9 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const DEFAULT_QUESTION = "How much did I spend on food in 2026-07?";
+const AI_CATEGORY_WARNING_TEXT = (
+  "AI Assist sends transaction descriptions, cleaned merchant names, dates, amounts, current categories, local suggestions, local reasons, and account labels to OpenAI for category suggestions. It does not apply changes automatically."
+);
 
 export default function App() {
   const [health, setHealth] = useState("Checking");
@@ -62,6 +66,7 @@ export default function App() {
   const [accounts, setAccounts] = useState([]);
   const [accountSummary, setAccountSummary] = useState([]);
   const [categoryReview, setCategoryReview] = useState([]);
+  const [aiCategoryStatus, setAiCategoryStatus] = useState(emptyAICategoryStatus());
   const [merchantRules, setMerchantRules] = useState([]);
   const [csvPresets, setCsvPresets] = useState([]);
   const [budgets, setBudgets] = useState([]);
@@ -127,6 +132,7 @@ export default function App() {
         accountPayload,
         accountSummaryPayload,
         categoryReviewPayload,
+        aiCategoryStatusPayload,
         merchantRulesPayload,
         csvPresetsPayload,
         budgetPayload,
@@ -158,6 +164,7 @@ export default function App() {
         request("/accounts"),
         request(`/accounts/summary${queryString({ month: activeMonth })}`),
         request(`/categories/review${queryString({ month: activeMonth, limit: 6 })}`),
+        request("/ai/categorization/status"),
         request("/merchant-rules"),
         request("/csv-mapping-presets"),
         request(`/budgets${queryString({ month: activeMonth })}`),
@@ -185,6 +192,7 @@ export default function App() {
       setAccounts(accountPayload);
       setAccountSummary(accountSummaryPayload);
       setCategoryReview(categoryReviewPayload);
+      setAiCategoryStatus(aiCategoryStatusPayload);
       setMerchantRules(merchantRulesPayload);
       setCsvPresets(csvPresetsPayload);
       setBudgets(budgetPayload);
@@ -361,7 +369,7 @@ export default function App() {
       setUploadStatus("Type RESET first.");
       return;
     }
-    if (!window.confirm("Reset all local finance data? This deletes transactions, upload history, budgets, merchant rules, CSV mapping presets, recurring ignores, anomaly dismissals, and Q&A history.")) return;
+    if (!window.confirm("Reset all local finance data? This deletes transactions, transaction splits, upload history, budgets, merchant rules, CSV mapping presets, recurring ignores, anomaly dismissals, and Q&A history.")) return;
 
     setBusy(true);
     try {
@@ -803,6 +811,29 @@ export default function App() {
     await handleCategoryChange(item.transaction, item.suggested_category, true);
   }
 
+  async function handleAICategoryReview() {
+    if (!window.confirm(`${AI_CATEGORY_WARNING_TEXT}\n\nContinue?`)) return;
+
+    setBusy(true);
+    setUploadStatus("Getting AI category suggestions...");
+    try {
+      const payload = await request(`/categories/review/ai${queryString({ month, limit: 6 })}`, { method: "POST" });
+      setCategoryReview(payload.suggestions);
+      setAiCategoryStatus({
+        enabled: payload.enabled,
+        model: payload.model,
+        message: `AI Assist returned ${payload.suggestions.length} suggestion${payload.suggestions.length === 1 ? "" : "s"}.`,
+      });
+      setUploadStatus(payload.suggestions.length
+        ? `AI suggested categories for ${payload.suggestions.length} transaction${payload.suggestions.length === 1 ? "" : "s"}. Review before applying.`
+        : "AI Assist did not find category suggestions for this view.");
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleTransactionFilterChange(name, value) {
     setTransactionFilters((current) => ({ ...current, [name]: value }));
   }
@@ -930,8 +961,10 @@ export default function App() {
         <section className="panel category-review-panel">
           <PanelTitle icon={<Tags size={18} />} title="Category Review" detail={`${categoryReview.length} queued`} />
           <CategoryReviewList
+            aiStatus={aiCategoryStatus}
             busy={busy || updatingTransactionId !== null}
             items={categoryReview}
+            onAskAI={handleAICategoryReview}
             onApply={handleApplyCategorySuggestion}
           />
         </section>
@@ -1330,33 +1363,53 @@ function BudgetRecommendationList({ busy, onApply, recommendations }) {
   );
 }
 
-function CategoryReviewList({ busy, items, onApply }) {
-  if (!items.length) return <p className="empty">No category review items.</p>;
-
+function CategoryReviewList({ aiStatus, busy, items, onAskAI, onApply }) {
   return (
-    <div className="category-review-list">
-      {items.map((item) => (
-        <div className={`category-review-row category-review-${item.action}`} key={item.transaction.id}>
-          <div>
-            <strong>{item.transaction.description}</strong>
-            <span>
-              {item.current_category} to {item.suggested_category} | {Math.round(item.confidence * 100)}% confidence
-            </span>
-            <small>{item.category_source_label || "Category signal"}: {item.reason}</small>
-          </div>
-          <div className="category-review-action">
-            <b>{money(Math.abs(item.transaction.amount))}</b>
-            {item.action === "update" ? (
-              <button disabled={busy} onClick={() => onApply(item)} type="button">
-                <Check size={15} />
-                Apply
-              </button>
-            ) : (
-              <span>Review</span>
-            )}
-          </div>
+    <div className="category-review-stack">
+      <div className="ai-review-callout">
+        <div>
+          <strong>AI Assist</strong>
+          <span>{AI_CATEGORY_WARNING_TEXT}</span>
+          <small>{aiStatus.enabled ? `Ready: ${aiStatus.model}` : aiStatus.message}</small>
         </div>
-      ))}
+        <button
+          className="ghost-button"
+          disabled={busy || !items.length || !aiStatus.enabled}
+          onClick={onAskAI}
+          type="button"
+        >
+          <Sparkles size={15} />
+          AI Assist
+        </button>
+      </div>
+      {!items.length ? (
+        <p className="empty">No category review items.</p>
+      ) : (
+        <div className="category-review-list">
+          {items.map((item) => (
+            <div className={`category-review-row category-review-${item.action}`} key={item.transaction.id}>
+              <div>
+                <strong>{item.transaction.description}</strong>
+                <span>
+                  {item.current_category} to {item.suggested_category} | {Math.round(item.confidence * 100)}% confidence
+                </span>
+                <small>{item.category_source_label || "Category signal"}: {item.reason}</small>
+              </div>
+              <div className="category-review-action">
+                <b>{money(Math.abs(item.transaction.amount))}</b>
+                {item.action === "update" ? (
+                  <button disabled={busy} onClick={() => onApply(item)} type="button">
+                    <Check size={15} />
+                    Apply
+                  </button>
+                ) : (
+                  <span>Review</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2523,6 +2576,14 @@ function emptyImportQuality() {
     anomalies: [],
     recurring_charges: [],
     notes: [],
+  };
+}
+
+function emptyAICategoryStatus() {
+  return {
+    enabled: false,
+    model: "",
+    message: "Set OPENAI_API_KEY to enable AI category suggestions.",
   };
 }
 

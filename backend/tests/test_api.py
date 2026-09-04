@@ -4,6 +4,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from app import ai_categorization
 from app.categorization import clean_merchant_description, merchant_key
 from app.database import reset_db
 from app.main import app, infer_month, money_to_cents, parse_transactions_csv
@@ -50,6 +51,9 @@ CUSTOM_MAPPING_CSV = """Posted,Payee,Outflow,Inflow,Bucket,Wallet
 @pytest.fixture(autouse=True)
 def isolated_db(monkeypatch, tmp_path):
     monkeypatch.setenv("FINANCE_DB_PATH", str(tmp_path / "finance.sqlite3"))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_CATEGORY_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
     reset_db()
 
 
@@ -1254,6 +1258,72 @@ def test_category_review_queue_suggests_uncertain_updates():
         item["transaction"]["description"]
         for item in updated_queue
     }
+
+
+def test_ai_categorization_status_and_disabled_review_guard():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+
+    status = client.get("/ai/categorization/status")
+    assert status.status_code == 200
+    assert status.json() == {
+        "enabled": False,
+        "model": "gpt-5-nano",
+        "message": "Set OPENAI_API_KEY to enable AI category suggestions.",
+    }
+
+    response = client.post("/categories/review/ai?month=2026-07")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "AI categorization is disabled. Set OPENAI_API_KEY to enable it."
+
+
+def test_ai_category_review_uses_mocked_openai_response(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_CATEGORY_MODEL", "test-model")
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+    captured = {}
+
+    def fake_openai_response(payload, api_key, timeout):
+        captured["payload"] = payload
+        captured["api_key"] = api_key
+        captured["timeout"] = timeout
+        request_data = json.loads(payload["input"][1]["content"][0]["text"])
+        suggestions = []
+        for transaction in request_data["transactions"]:
+            suggestions.append({
+                "transaction_id": transaction["id"],
+                "category": "Health" if transaction["merchant"] == "Gym Membership" else "Shopping",
+                "confidence": 0.91,
+                "reason": f"{transaction['merchant']} looks like a known expense type.",
+                "matched_terms": [transaction["merchant"]],
+            })
+        return {"output_text": json.dumps({"suggestions": suggestions})}
+
+    monkeypatch.setattr(ai_categorization, "_post_openai_response", fake_openai_response)
+
+    response = client.post("/categories/review/ai?month=2026-07&limit=6")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is True
+    assert payload["model"] == "test-model"
+    assert "to OpenAI" in payload["warning"]
+    assert captured["api_key"] == "test-key"
+    assert captured["timeout"] == 20
+    assert captured["payload"]["store"] is False
+    assert captured["payload"]["max_output_tokens"] == 700
+    request_data = json.loads(captured["payload"]["input"][1]["content"][0]["text"])
+    assert "Income" not in request_data["allowed_categories"]
+    assert {item["merchant"] for item in request_data["transactions"]} == {"Gym Membership", "Random Shop"}
+
+    by_description = {
+        item["transaction"]["description"]: item
+        for item in payload["suggestions"]
+    }
+    assert by_description["Gym Membership"]["suggested_category"] == "Health"
+    assert by_description["Gym Membership"]["category_source"] == "ai_suggestion"
+    assert by_description["Gym Membership"]["category_source_label"] == "AI suggestion"
+    assert by_description["Gym Membership"]["confidence_label"] == "high"
+    assert by_description["Random Shop"]["suggested_category"] == "Shopping"
 
 
 def test_pdf_upload_imports_text_statement_rows():

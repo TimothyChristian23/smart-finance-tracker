@@ -14,6 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
+from app.ai_categorization import (
+    AICategorizationError,
+    AICategorizationNotConfigured,
+    ai_categorization_status,
+    suggest_category_reviews_with_ai,
+)
 from app.categorization import (
     CATEGORY_OPTIONS,
     categories_from_question,
@@ -259,6 +265,19 @@ class CategoryReviewResponse(BaseModel):
     matched_terms: list[str] = Field(default_factory=list)
     reason: str
     action: str
+
+
+class AICategorizationStatusResponse(BaseModel):
+    enabled: bool
+    model: str
+    message: str
+
+
+class AICategoryReviewResponse(BaseModel):
+    enabled: bool
+    model: str
+    warning: str
+    suggestions: list[CategoryReviewResponse]
 
 
 class CategoryUpdateRequest(BaseModel):
@@ -576,6 +595,12 @@ CSV_MAPPING_FIELDS = [
     "account_column",
 ]
 
+AI_CATEGORY_WARNING = (
+    "AI Assist sends transaction descriptions, cleaned merchant names, dates, amounts, "
+    "current categories, local category suggestions, local reasons, and account labels "
+    "to OpenAI for category suggestions. It does not apply changes automatically."
+)
+
 
 @app.get("/health")
 async def health() -> dict:
@@ -859,6 +884,28 @@ async def category_options() -> list[str]:
 @app.get("/categories/review", response_model=list[CategoryReviewResponse])
 async def category_review(month: str | None = None, limit: int = 20) -> list[dict]:
     return category_review_queue(month=validate_month(month), limit=bounded_limit(limit))
+
+
+@app.get("/ai/categorization/status", response_model=AICategorizationStatusResponse)
+async def ai_category_status() -> dict:
+    return ai_categorization_status()
+
+
+@app.post("/categories/review/ai", response_model=AICategoryReviewResponse)
+def ai_category_review(month: str | None = None, limit: int = 20) -> dict:
+    status = ai_categorization_status()
+    review_items = category_review_queue(month=validate_month(month), limit=bounded_limit(limit))
+    try:
+        suggestions = suggest_category_reviews_with_ai(review_items)
+    except AICategorizationNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except AICategorizationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        **status,
+        "warning": AI_CATEGORY_WARNING,
+        "suggestions": suggestions,
+    }
 
 
 @app.get("/merchant-rules", response_model=list[MerchantRuleResponse])

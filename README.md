@@ -20,6 +20,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Import quality report for duplicate skips, category review needs, anomalies, and recurring detections
 - SQLite transaction storage
 - Explainable starter categorization with confidence, source, and matched merchant signals
+- Optional OpenAI-powered AI Assist for review-only category suggestions
 - Editable transaction categories
 - Category review queue with confidence-scored suggestions
 - Saved normalized merchant rules that apply to future imports
@@ -98,6 +99,13 @@ Open the API docs:
 http://localhost:8000/docs
 ```
 
+Optional AI Assist:
+
+```bash
+copy .env.example .env
+# Add your key to OPENAI_API_KEY before using AI Assist.
+```
+
 ## Frontend Quick Start
 
 ```bash
@@ -138,6 +146,8 @@ GET  /forecast/monthly?month=2026-08
 GET  /months
 GET  /uploads
 GET  /imports/quality?month=2026-07
+GET  /ai/categorization/status
+POST /categories/review/ai?month=2026-07
 GET  /csv-mapping-presets
 POST /transactions
 POST /transactions/preview
@@ -275,6 +285,15 @@ get the same explanation through Q&A. Applying a suggestion can also save a
 merchant rule for future imports.
 Merchant rules can also be created from the dashboard or `PUT /merchant-rules`;
 turn on `apply_existing` to recategorize matching transactions already in SQLite.
+
+AI Assist can optionally ask OpenAI for category suggestions for the current
+category review queue. Set `OPENAI_API_KEY` on the backend to enable it, and
+optionally override `OPENAI_CATEGORY_MODEL` from the default `gpt-5-nano`.
+The dashboard shows a warning and asks for confirmation before sending review
+candidates to OpenAI. The sent fields are transaction descriptions, cleaned
+merchant names, dates, amounts, current categories, local suggestions, local
+reasons, and account labels. AI Assist returns suggestions only; users must
+apply any category change themselves.
 
 ## Notes
 

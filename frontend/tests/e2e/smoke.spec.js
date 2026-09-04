@@ -72,6 +72,9 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   const qualityPanel = page.getByTestId("quality-panel");
   await expect(qualityPanel.locator(".quality-summary strong")).toHaveText("Needs Review");
   await expect(qualityPanel.getByText(/transactions available for this view/)).toBeVisible();
+  const categoryReviewPanel = page.locator(".category-review-panel");
+  await expect(categoryReviewPanel.getByText("AI Assist sends transaction descriptions")).toBeVisible();
+  await expect(categoryReviewPanel.getByRole("button", { name: "AI Assist" })).toBeDisabled();
   const transactionsPanel = page.getByTestId("transactions-panel");
   const modal = page.getByTestId("transaction-modal");
   await expect(transactionsPanel.getByText("Trader Joes")).toBeVisible();

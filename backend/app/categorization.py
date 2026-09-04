@@ -154,6 +154,7 @@ REVIEW_CATEGORY_KEYWORDS = {
 }
 
 CATEGORY_SOURCE_LABELS = {
+    "ai_suggestion": "AI suggestion",
     "amount_direction": "Amount direction",
     "category_signals": "Category signals",
     "fallback": "Needs review",
