@@ -678,6 +678,104 @@ def test_update_transaction_details_recalculates_analytics():
     assert filtered[0]["description"] == "Trader Joe's Market"
 
 
+def test_transaction_splits_reallocate_category_analytics_and_budget_qna():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Amazon Marketplace"
+    )
+
+    response = client.put(
+        f"/transactions/{transaction['id']}/splits",
+        json={
+            "splits": [
+                {"category": "Dining", "amount": 25.20, "note": "Lunch supplies"},
+                {"category": "Subscriptions", "amount": 40.00},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["is_split"] is True
+    assert payload["split_total"] == 65.2
+    assert payload["unsplit_amount"] == 0
+    assert [split["category"] for split in payload["splits"]] == ["Dining", "Subscriptions"]
+    assert payload["splits"][0]["note"] == "Lunch supplies"
+    assert client.get(f"/transactions/{transaction['id']}/splits").json()[1]["amount"] == 40.0
+
+    summary = client.get("/summary?month=2026-07").json()
+    categories = {item["category"]: item["total"] for item in summary["categories"]}
+    assert summary["total_spending"] == 2840.87
+    assert categories["Shopping"] == 899.0
+    assert categories["Dining"] == 84.77
+    assert categories["Subscriptions"] == 40.0
+
+    client.put("/budgets", json={"month": "2026-07", "category": "Dining", "amount": 80})
+    budget = client.get("/budgets?month=2026-07").json()[0]
+    assert budget["spent"] == 84.77
+    assert budget["status"] == "over"
+
+    answer = client.post("/ask", json={"question": "How much did I spend on dining in July 2026?"}).json()
+    assert answer["intent"] == "category_spending"
+    assert answer["amount"] == 84.77
+
+    filtered = client.get("/transactions", params={"month": "2026-07", "category": "Subscriptions"}).json()
+    assert {item["description"] for item in filtered} == {"Amazon Marketplace"}
+
+    cleared = client.delete(f"/transactions/{transaction['id']}/splits").json()
+    assert cleared["is_split"] is False
+    assert cleared["splits"] == []
+    restored_categories = {
+        item["category"]: item["total"]
+        for item in client.get("/categories?month=2026-07").json()
+    }
+    assert restored_categories["Shopping"] == 964.2
+
+
+def test_transaction_splits_validate_totals_category_uniqueness_and_expenses():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    expense = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Amazon Marketplace"
+    )
+    income = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Payroll Deposit"
+    )
+
+    mismatch = client.put(
+        f"/transactions/{expense['id']}/splits",
+        json={
+            "splits": [
+                {"category": "Dining", "amount": 20.00},
+                {"category": "Shopping", "amount": 20.00},
+            ],
+        },
+    )
+    duplicate_categories = client.put(
+        f"/transactions/{expense['id']}/splits",
+        json={
+            "splits": [
+                {"category": "Dining", "amount": 25.20},
+                {"category": "Dining", "amount": 40.00},
+            ],
+        },
+    )
+    income_split = client.put(
+        f"/transactions/{income['id']}/splits",
+        json={"splits": [{"category": "Income", "amount": 3200.00}]},
+    )
+
+    assert mismatch.status_code == 400
+    assert mismatch.json()["detail"] == "Split amounts must equal the transaction expense amount."
+    assert duplicate_categories.status_code == 400
+    assert duplicate_categories.json()["detail"] == "split categories must be unique."
+    assert income_split.status_code == 400
+    assert income_split.json()["detail"] == "Only expense transactions can be split."
+    assert client.put("/transactions/999999/splits", json={"splits": [{"category": "Dining", "amount": 1}]}).status_code == 404
+
+
 def test_update_transaction_details_validates_inputs():
     client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
     transaction = client.get("/transactions").json()[0]
@@ -747,6 +845,7 @@ def test_data_export_backup_includes_local_finance_records():
     assert payload["schema_version"] == 1
     assert payload["counts"] == {
         "transactions": 11,
+        "transaction_splits": 0,
         "uploads": 1,
         "merchant_rules": 1,
         "recurring_ignores": 1,
@@ -809,6 +908,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
         "message": "Backup restored.",
         "counts": {
             "transactions": 11,
+            "transaction_splits": 0,
             "uploads": 1,
             "merchant_rules": 1,
             "recurring_ignores": 1,
@@ -830,6 +930,54 @@ def test_data_import_restores_backup_and_recalculates_analytics():
     assert client.get("/budgets?month=2026-07").json()[0]["category"] == "Dining"
     assert client.get("/ask/history").json()[0]["question"] == "How much did I spend on food in 2026-07?"
     assert client.get("/accounts/summary?month=2026-07").json()[0]["account_name"] == "Chase Checking"
+
+
+def test_data_backup_restores_transaction_splits():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+    transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Amazon Marketplace"
+    )
+    client.put(
+        f"/transactions/{transaction['id']}/splits",
+        json={
+            "splits": [
+                {"category": "Dining", "amount": 25.20, "note": "Lunch supplies"},
+                {"category": "Subscriptions", "amount": 40.00},
+            ],
+        },
+    )
+
+    backup = client.get("/data/export").json()
+
+    assert backup["counts"]["transaction_splits"] == 2
+    backed_up_transaction = next(
+        item for item in backup["transactions"]
+        if item["description"] == "Amazon Marketplace"
+    )
+    assert [split["category"] for split in backed_up_transaction["splits"]] == ["Dining", "Subscriptions"]
+
+    client.delete("/data", params={"confirmation": "RESET"})
+    response = client.post(
+        "/data/import",
+        data={"confirmation": "RESTORE"},
+        files={"file": ("backup.json", json.dumps(backup), "application/json")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["counts"]["transaction_splits"] == 2
+    restored_transaction = next(
+        item for item in client.get("/transactions").json()
+        if item["description"] == "Amazon Marketplace"
+    )
+    assert restored_transaction["is_split"] is True
+    assert restored_transaction["splits"][0]["note"] == "Lunch supplies"
+    categories = {
+        item["category"]: item["total"]
+        for item in client.get("/summary?month=2026-07").json()["categories"]
+    }
+    assert categories["Dining"] == 84.77
+    assert categories["Subscriptions"] == 40.0
 
 
 def test_data_import_requires_confirmation_and_valid_backup():
@@ -928,6 +1076,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
     backup = client.get("/data/export").json()
     assert backup["counts"] == {
         "transactions": 0,
+        "transaction_splits": 0,
         "uploads": 0,
         "merchant_rules": 0,
         "recurring_ignores": 0,

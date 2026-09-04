@@ -73,6 +73,7 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(qualityPanel.locator(".quality-summary strong")).toHaveText("Needs Review");
   await expect(qualityPanel.getByText(/transactions available for this view/)).toBeVisible();
   const transactionsPanel = page.getByTestId("transactions-panel");
+  const modal = page.getByTestId("transaction-modal");
   await expect(transactionsPanel.getByText("Trader Joes")).toBeVisible();
 
   const rulesPanel = page.getByTestId("rules-panel");
@@ -88,9 +89,27 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(transactionsPanel.getByLabel("Category for Amazon Marketplace")).toHaveValue("Subscriptions");
   await transactionsPanel.getByLabel("Search transactions").fill("");
 
-  await transactionsPanel.getByRole("button", { name: "Add" }).click();
+  await transactionsPanel.getByLabel("Edit Amazon Marketplace").click();
+  await expect(modal.getByRole("heading", { name: "Amazon Marketplace" })).toBeVisible();
+  await modal.getByRole("button", { name: "Add Split" }).click();
+  await modal.getByLabel("Split 1 category").selectOption("Dining");
+  await modal.getByLabel("Split 1 amount").fill("25.20");
+  await modal.getByLabel("Split 1 note").fill("Lunch supplies");
+  await modal.getByRole("button", { name: "Add Split" }).click();
+  await modal.getByLabel("Split 2 category").selectOption("Subscriptions");
+  await modal.getByLabel("Split 2 amount").fill("40");
+  await expect(modal.getByText("Balanced")).toBeVisible();
+  await modal.getByRole("button", { name: "Save Splits" }).click();
+  await expect(page.getByTestId("status-message")).toHaveText("Split Amazon Marketplace across 2 categories.");
+  await modal.getByLabel("Close transaction form").click();
+  await expect(transactionsPanel.getByText("Split: Dining $25.20 | Subscriptions $40.00")).toBeVisible();
 
-  const modal = page.getByTestId("transaction-modal");
+  const askPanel = page.getByTestId("ask-panel");
+  await askPanel.locator("textarea").fill("How much did I spend on dining in July 2026?");
+  await askPanel.getByRole("button", { name: "Ask" }).click();
+  await expect(page.getByTestId("answer-card")).toContainText("You spent $171.19 on Dining for 2026-07.");
+
+  await transactionsPanel.getByRole("button", { name: "Add" }).click();
   await expect(modal.getByRole("heading", { name: "New Transaction" })).toBeVisible();
   await modal.getByLabel("Date").fill("2026-07-14");
   await modal.getByLabel("Description").fill("Cash Lunch");
@@ -101,7 +120,6 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(page.getByTestId("status-message")).toHaveText("Added Cash Lunch.");
   await expect(transactionsPanel.getByText("Cash Lunch")).toBeVisible();
 
-  const askPanel = page.getByTestId("ask-panel");
   await askPanel.locator("textarea").fill("How much did I spend on Cash in July 2026?");
   await askPanel.getByRole("button", { name: "Ask" }).click();
   await expect(page.getByTestId("answer-card")).toContainText("Spending for Cash in 2026-07 was $42.00.");
@@ -155,7 +173,7 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(modal.getByRole("heading", { name: "Cash Lunch" })).toBeVisible();
   await modal.getByLabel("Description").fill("Cash Dinner");
   await modal.getByLabel("Amount").fill("-45");
-  await modal.getByRole("button", { name: "Save" }).click();
+  await modal.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByTestId("status-message")).toHaveText("Updated Cash Dinner.");
   await expect(transactionsPanel.getByText("Cash Dinner")).toBeVisible();
 

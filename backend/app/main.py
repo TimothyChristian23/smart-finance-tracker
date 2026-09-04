@@ -30,6 +30,7 @@ from app.database import (
     category_totals,
     cents_to_dollars,
     create_transaction,
+    clear_transaction_splits,
     delete_anomaly_ignore,
     delete_budget,
     delete_csv_import_preset,
@@ -51,6 +52,7 @@ from app.database import (
     list_csv_import_presets,
     list_merchant_rules,
     list_recurring_ignores,
+    list_transaction_splits,
     list_transactions,
     list_uploads,
     monthly_forecast,
@@ -64,6 +66,7 @@ from app.database import (
     restore_backup,
     recurring_charges,
     recurring_bill_calendar,
+    replace_transaction_splits,
     reset_all_data,
     reset_db,
     save_csv_import_preset,
@@ -170,6 +173,7 @@ class AccountSummaryResponse(BaseModel):
 
 class DataRestoreCounts(BaseModel):
     transactions: int
+    transaction_splits: int = 0
     uploads: int
     merchant_rules: int
     recurring_ignores: int
@@ -184,6 +188,16 @@ class DataRestoreResponse(BaseModel):
     counts: DataRestoreCounts
 
 
+class TransactionSplitResponse(BaseModel):
+    id: int
+    transaction_id: int
+    category: str
+    amount: float
+    note: str | None = None
+    created_at: str
+    updated_at: str
+
+
 class TransactionResponse(BaseModel):
     id: int
     date: str
@@ -192,6 +206,20 @@ class TransactionResponse(BaseModel):
     category: str
     source_file: str | None = None
     account_name: str | None = None
+    splits: list[TransactionSplitResponse] = Field(default_factory=list)
+    is_split: bool = False
+    split_total: float = 0
+    unsplit_amount: float = 0
+
+
+class TransactionSplitRequest(BaseModel):
+    category: str = Field(..., min_length=1, max_length=80)
+    amount: float = Field(..., gt=0)
+    note: str | None = Field(None, max_length=120)
+
+
+class TransactionSplitUpdateRequest(BaseModel):
+    splits: list[TransactionSplitRequest] = Field(..., min_length=1, max_length=20)
 
 
 class CsvImportPresetRequest(BaseModel):
@@ -784,6 +812,33 @@ async def update_transaction(transaction_id: int, request: TransactionUpdateRequ
         category=category,
         account_name=account_name,
     )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    return updated
+
+
+@app.get("/transactions/{transaction_id}/splits", response_model=list[TransactionSplitResponse])
+async def transaction_splits(transaction_id: int) -> list[dict]:
+    splits = list_transaction_splits(transaction_id)
+    if splits is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    return splits
+
+
+@app.put("/transactions/{transaction_id}/splits", response_model=TransactionResponse)
+async def replace_splits(transaction_id: int, request: TransactionSplitUpdateRequest) -> dict:
+    try:
+        updated = replace_transaction_splits(transaction_id, validate_transaction_splits(request.splits))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    return updated
+
+
+@app.delete("/transactions/{transaction_id}/splits", response_model=TransactionResponse)
+async def remove_splits(transaction_id: int) -> dict:
+    updated = clear_transaction_splits(transaction_id)
     if updated is None:
         raise HTTPException(status_code=404, detail="Transaction not found.")
     return updated
@@ -1806,6 +1861,39 @@ def validate_category(category: str) -> str:
         status_code=400,
         detail=f"category must be one of: {', '.join(CATEGORY_OPTIONS)}.",
     )
+
+
+def validate_transaction_splits(splits: list[TransactionSplitRequest]) -> list[dict]:
+    seen_categories = set()
+    validated = []
+    for split in splits:
+        category = validate_category(split.category)
+        if category in seen_categories:
+            raise HTTPException(status_code=400, detail="split categories must be unique.")
+        seen_categories.add(category)
+
+        amount_cents = dollars_to_cents(split.amount)
+        if amount_cents <= 0:
+            raise HTTPException(status_code=400, detail="split amounts must be greater than zero.")
+
+        validated.append({
+            "category": category,
+            "amount_cents": amount_cents,
+            "note": validate_split_note(split.note),
+        })
+    return validated
+
+
+def validate_split_note(note: str | None) -> str | None:
+    if note is None:
+        return None
+
+    normalized = " ".join(note.split())
+    if not normalized:
+        return None
+    if len(normalized) > 120:
+        raise HTTPException(status_code=400, detail="split note must be 120 characters or fewer.")
+    return normalized
 
 
 def validate_account_name(account_name: str | None) -> str | None:

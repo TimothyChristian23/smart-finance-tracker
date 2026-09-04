@@ -514,6 +514,57 @@ export default function App() {
     }
   }
 
+  async function handleSaveTransactionSplits() {
+    if (!editingTransaction) return;
+    const splits = splitDraftPayload(editDraft.splits);
+    if (!splits.length) {
+      setUploadStatus("Add at least one split row.");
+      return;
+    }
+    if (Number(editDraft.amount) >= 0) {
+      setUploadStatus("Only expense transactions can be split.");
+      return;
+    }
+    if (splitDraftTotalCents(editDraft.splits) !== Math.abs(toCents(editDraft.amount))) {
+      setUploadStatus("Split amounts must equal the transaction expense amount.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const saved = await request(`/transactions/${editingTransaction.id}/splits`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ splits }),
+      });
+      setEditingTransaction(saved);
+      setEditDraft(transactionToDraft(saved));
+      setUploadStatus(`Split ${saved.description} across ${saved.splits.length} categories.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleClearTransactionSplits() {
+    if (!editingTransaction) return;
+
+    setBusy(true);
+    try {
+      const saved = await request(`/transactions/${editingTransaction.id}/splits`, { method: "DELETE" });
+      setEditingTransaction(saved);
+      setEditDraft(transactionToDraft(saved));
+      setUploadStatus(`Cleared splits for ${saved.description}.`);
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleDeleteTransaction(transaction) {
     if (!window.confirm(`Delete ${transaction.description}?`)) return;
 
@@ -1079,8 +1130,10 @@ export default function App() {
           draft={editDraft}
           busy={busy}
           mode={creatingTransaction ? "create" : "edit"}
+          onClearSplits={handleClearTransactionSplits}
           onClose={handleCloseTransactionEditor}
           onDraftChange={setEditDraft}
+          onSaveSplits={handleSaveTransactionSplits}
           onSubmit={handleTransactionEditSubmit}
           transaction={editingTransaction}
         />
@@ -1928,6 +1981,7 @@ function TransactionRow({ categoryOptions, deleting, onCategoryChange, onDelete,
       <div className="transaction-description">
         <strong>{transaction.description}</strong>
         <span>{sourceLabel}</span>
+        {transaction.is_split && <small>{splitSummary(transaction)}</small>}
       </div>
       <div>
         <CategoryEditor
@@ -1966,9 +2020,21 @@ function TransactionRow({ categoryOptions, deleting, onCategoryChange, onDelete,
   );
 }
 
-function TransactionEditModal({ busy, categoryOptions, draft, mode = "edit", onClose, onDraftChange, onSubmit, transaction }) {
+function TransactionEditModal({
+  busy,
+  categoryOptions,
+  draft,
+  mode = "edit",
+  onClearSplits,
+  onClose,
+  onDraftChange,
+  onSaveSplits,
+  onSubmit,
+  transaction,
+}) {
   const isCreate = mode === "create";
   const title = isCreate ? "New Transaction" : transaction?.description || "Transaction";
+  const canSplit = !isCreate && Number(draft.amount) < 0;
 
   return (
     <div className="modal-backdrop">
@@ -2039,6 +2105,17 @@ function TransactionEditModal({ busy, categoryOptions, draft, mode = "edit", onC
               value={draft.account_name}
             />
           </label>
+          {canSplit && (
+            <TransactionSplitEditor
+              busy={busy}
+              categoryOptions={categoryOptions}
+              draft={draft}
+              onClear={onClearSplits}
+              onDraftChange={onDraftChange}
+              onSave={onSaveSplits}
+              transaction={transaction}
+            />
+          )}
           <div className="modal-actions full-span">
             <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
             <button type="submit" disabled={busy || !draft.category}>
@@ -2052,7 +2129,135 @@ function TransactionEditModal({ busy, categoryOptions, draft, mode = "edit", onC
   );
 }
 
+function TransactionSplitEditor({ busy, categoryOptions, draft, onClear, onDraftChange, onSave, transaction }) {
+  const splits = draft.splits || [];
+  const targetCents = Math.abs(toCents(draft.amount));
+  const totalCents = splitDraftTotalCents(splits);
+  const remainingCents = targetCents - totalCents;
+  const balanced = splits.length > 0 && remainingCents === 0;
+
+  function addSplit() {
+    onDraftChange({
+      ...draft,
+      splits: [...splits, emptySplitDraft(defaultTransactionCategory(categoryOptions))],
+    });
+  }
+
+  function updateSplit(index, patch) {
+    onDraftChange({
+      ...draft,
+      splits: splits.map((split, splitIndex) => (
+        splitIndex === index ? { ...split, ...patch } : split
+      )),
+    });
+  }
+
+  function removeSplit(index) {
+    onDraftChange({
+      ...draft,
+      splits: splits.filter((_, splitIndex) => splitIndex !== index),
+    });
+  }
+
+  function clearDraftSplits() {
+    if (transaction?.is_split) {
+      onClear();
+      return;
+    }
+    onDraftChange({ ...draft, splits: [] });
+  }
+
+  return (
+    <section className="split-editor full-span">
+      <div className="split-editor-header">
+        <div>
+          <strong>Split Categories</strong>
+          <span>{money(totalCents / 100)} / {money(targetCents / 100)}</span>
+        </div>
+        <button className="ghost-button" type="button" disabled={busy || !categoryOptions.length} onClick={addSplit}>
+          <Plus size={15} />
+          Add Split
+        </button>
+      </div>
+      {!!splits.length && (
+        <div className="split-lines">
+          {splits.map((split, index) => (
+            <div className="split-line" key={`${index}-${split.category}`}>
+              <select
+                aria-label={`Split ${index + 1} category`}
+                disabled={busy}
+                onChange={(event) => updateSplit(index, { category: event.target.value })}
+                value={split.category}
+              >
+                {!split.category && <option value="">Category</option>}
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+              <input
+                aria-label={`Split ${index + 1} amount`}
+                disabled={busy}
+                min="0.01"
+                onChange={(event) => updateSplit(index, { amount: event.target.value })}
+                placeholder="Amount"
+                step="0.01"
+                type="number"
+                value={split.amount}
+              />
+              <input
+                aria-label={`Split ${index + 1} note`}
+                disabled={busy}
+                maxLength={120}
+                onChange={(event) => updateSplit(index, { note: event.target.value })}
+                placeholder="Note"
+                value={split.note}
+              />
+              <button
+                aria-label={`Remove split ${index + 1}`}
+                className="row-icon-button"
+                disabled={busy}
+                onClick={() => removeSplit(index)}
+                title="Remove split"
+                type="button"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className={`split-balance ${balanced ? "split-balanced" : "split-unbalanced"}`}>
+        <span>{balanced ? "Balanced" : "Needs adjustment"}</span>
+        <b>
+          {remainingCents === 0
+            ? money(0)
+            : `${money(Math.abs(remainingCents) / 100)} ${remainingCents > 0 ? "left" : "over"}`}
+        </b>
+      </div>
+      <div className="split-actions">
+        <button
+          className="ghost-button"
+          type="button"
+          disabled={busy || (!transaction?.is_split && !splits.length)}
+          onClick={clearDraftSplits}
+        >
+          <Trash2 size={15} />
+          Clear
+        </button>
+        <button type="button" disabled={busy || !balanced} onClick={onSave}>
+          <Check size={15} />
+          Save Splits
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function CategoryEditor({ options, onCategoryChange, transaction, updating }) {
+  if (transaction.is_split) {
+    return <span className="category-pill split-pill">Split ({transaction.splits.length})</span>;
+  }
+
   if (!options.length) {
     return <span className="category-pill">{transaction.category}</span>;
   }
@@ -2119,6 +2324,7 @@ function emptyTransactionDraft() {
     amount: "",
     category: "",
     account_name: "",
+    splits: [],
   };
 }
 
@@ -2181,6 +2387,7 @@ function newTransactionDraft(activeMonth, categoryOptions, accountName) {
     amount: "",
     category: defaultTransactionCategory(categoryOptions),
     account_name: accountName || "",
+    splits: [],
   };
 }
 
@@ -2203,7 +2410,46 @@ function transactionToDraft(transaction) {
     amount: String(transaction.amount),
     category: transaction.category,
     account_name: transaction.account_name || "",
+    splits: (transaction.splits || []).map((split) => ({
+      category: split.category,
+      amount: String(split.amount),
+      note: split.note || "",
+    })),
   };
+}
+
+function emptySplitDraft(category = "") {
+  return {
+    category,
+    amount: "",
+    note: "",
+  };
+}
+
+function splitDraftPayload(splits = []) {
+  return splits
+    .filter((split) => split.category && Number(split.amount) > 0)
+    .map((split) => ({
+      category: split.category,
+      amount: Number(split.amount),
+      note: split.note.trim() || null,
+    }));
+}
+
+function splitDraftTotalCents(splits = []) {
+  return splits.reduce((total, split) => total + Math.max(toCents(split.amount), 0), 0);
+}
+
+function toCents(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return 0;
+  return Math.round(amount * 100);
+}
+
+function splitSummary(transaction) {
+  return `Split: ${(transaction.splits || [])
+    .map((split) => `${split.category} ${money(split.amount)}`)
+    .join(" | ")}`;
 }
 
 function emptySummary() {

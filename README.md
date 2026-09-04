@@ -25,13 +25,14 @@ The first implementation slice focuses on trustworthy analytics:
 - Saved normalized merchant rules that apply to future imports
 - Direct merchant rule creation with optional retroactive category updates
 - Editable transaction details for date, description, signed amount, category, and account
+- Expense transaction splitting across categories with notes and split-aware analytics
 - Individual transaction deletion with confirmation
 - Monthly category budgets with live progress
 - Budget recommendations from recent history and recurring charges
 - Recurring charge and subscription detection with hide/restore controls
 - Recurring bill calendar for expected upcoming charges
 - Transaction search, category filtering, and CSV export
-- Full local JSON backup export for transactions, uploads, budgets, merchant rules, CSV mapping presets, recurring ignore preferences, and anomaly dismissals
+- Full local JSON backup export for transactions, transaction splits, uploads, budgets, merchant rules, CSV mapping presets, recurring ignore preferences, anomaly dismissals, and Q&A history
 - Guarded JSON backup restore for moving or recovering local development data
 - Guarded local data reset with typed confirmation
 - Monthly spending summaries
@@ -44,7 +45,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Local Q&A history for recent finance questions and answers
 - React dashboard scaffold
 - Locked frontend dependency install and production build
-- Browser UI smoke test for import, manual transactions, backup/restore, and Q&A
+- Browser UI smoke test for import, manual transactions, transaction splitting, backup/restore, and Q&A
 - GitHub Actions backend test, frontend build, and UI smoke workflows
 
 Future LLM layers can improve ambiguous categorization, explain trends, and add
@@ -169,6 +170,9 @@ POST /recurring/ignored
 POST /anomalies/{id}/ignore
 PATCH /transactions/{id}/category
 PATCH /transactions/{id}
+GET  /transactions/{id}/splits
+PUT  /transactions/{id}/splits
+DELETE /transactions/{id}/splits
 DELETE /transactions/{id}
 DELETE /budgets/{id}
 DELETE /merchant-rules/{id}
@@ -213,9 +217,15 @@ The Account Summary panel and `GET /accounts/summary` endpoint break spending,
 income, net cash flow, and transaction counts down by account.
 Manual transactions can be added from the Transactions panel and are stored with
 `manual` as their source.
+Expense transactions can be split into multiple category allocations from the
+edit modal or split endpoints. Split lines must total the original expense and
+then drive category summaries, budgets, category filters, and deterministic
+category Q&A while the original transaction amount stays intact for account
+totals and CSV export.
 
 Use `GET /data/export` or the dashboard Backup button to download a JSON snapshot
-of local finance data before clearing or moving development databases.
+of local finance data, including transaction splits, before clearing or moving
+development databases.
 Use the Privacy panel Restore control or `POST /data/import` with a backup JSON
 file and `confirmation=RESTORE` to replace local data from a backup.
 The dashboard Privacy panel can reset all local app records after typing `RESET`;

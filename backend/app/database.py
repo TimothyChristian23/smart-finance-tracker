@@ -82,6 +82,7 @@ def connect() -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     init_db(conn)
     return conn
 
@@ -112,6 +113,32 @@ def init_db(conn: sqlite3.Connection) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_transactions_category
         ON transactions (category)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS transaction_splits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+            note TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_transaction_splits_transaction
+        ON transaction_splits (transaction_id)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_transaction_splits_category
+        ON transaction_splits (category)
         """
     )
     conn.execute(
@@ -247,6 +274,7 @@ def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, 
 def reset_db() -> None:
     """Delete imported transaction data."""
     with connect() as conn:
+        conn.execute("DELETE FROM transaction_splits")
         conn.execute("DELETE FROM transactions")
         conn.execute("DELETE FROM upload_history")
         conn.commit()
@@ -255,6 +283,7 @@ def reset_db() -> None:
 def reset_all_data() -> None:
     """Delete all locally stored finance records."""
     with connect() as conn:
+        conn.execute("DELETE FROM transaction_splits")
         conn.execute("DELETE FROM transactions")
         conn.execute("DELETE FROM upload_history")
         conn.execute("DELETE FROM merchant_rules")
@@ -349,7 +378,8 @@ def create_transaction(
             """,
             (cursor.lastrowid,),
         ).fetchone()
-    return _transaction_row_to_dict(row)
+        transaction = _transaction_row_to_dict(row, _splits_for_transaction(conn, row["id"]))
+    return transaction
 
 
 def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
@@ -1005,18 +1035,8 @@ def delete_csv_import_preset(preset_id: int) -> bool:
 
 def budget_progress(month: str) -> list[dict]:
     """Return monthly budget targets with live spending progress."""
-    where_sql, params = _month_filter(month)
+    spending_rows = _category_spending_totals(month=month)
     with connect() as conn:
-        spending_rows = conn.execute(
-            f"""
-            SELECT category, COALESCE(SUM(ABS(amount_cents)), 0) AS spent_cents
-            FROM transactions
-            {where_sql}
-              {"AND" if where_sql else "WHERE"} amount_cents < 0
-            GROUP BY category
-            """,
-            params,
-        ).fetchall()
         budget_rows = conn.execute(
             """
             SELECT id, month, category, amount_cents, updated_at
@@ -1028,7 +1048,7 @@ def budget_progress(month: str) -> list[dict]:
         ).fetchall()
 
     spending_by_category = {
-        row["category"]: int(row["spent_cents"])
+        row["category"]: row["total_cents"]
         for row in spending_rows
     }
     return [
@@ -1167,7 +1187,11 @@ def list_transactions(
             """,
             [*params, limit],
         ).fetchall()
-    return [_transaction_row_to_dict(row) for row in rows]
+        splits_by_transaction = _splits_for_transactions(conn, [row["id"] for row in rows])
+    return [
+        _transaction_row_to_dict(row, splits_by_transaction.get(row["id"], []))
+        for row in rows
+    ]
 
 
 def get_transaction(transaction_id: int) -> dict | None:
@@ -1181,7 +1205,96 @@ def get_transaction(transaction_id: int) -> dict | None:
             """,
             (transaction_id,),
         ).fetchone()
-    return _transaction_row_to_dict(row) if row else None
+        splits = _splits_for_transaction(conn, row["id"]) if row else []
+    return _transaction_row_to_dict(row, splits) if row else None
+
+
+def list_transaction_splits(transaction_id: int) -> list[dict] | None:
+    """Return split lines for one transaction, or None when the transaction is missing."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _splits_for_transaction(conn, transaction_id)
+
+
+def replace_transaction_splits(transaction_id: int, splits: list[dict]) -> dict | None:
+    """Replace split lines for one expense transaction."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        if int(row["amount_cents"]) >= 0:
+            raise ValueError("Only expense transactions can be split.")
+
+        expected_total = abs(int(row["amount_cents"]))
+        split_total = sum(int(split["amount_cents"]) for split in splits)
+        if split_total != expected_total:
+            raise ValueError("Split amounts must equal the transaction expense amount.")
+
+        conn.execute(
+            """
+            DELETE FROM transaction_splits
+            WHERE transaction_id = ?
+            """,
+            (transaction_id,),
+        )
+        conn.executemany(
+            """
+            INSERT INTO transaction_splits (transaction_id, category, amount_cents, note)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                (
+                    transaction_id,
+                    split["category"],
+                    split["amount_cents"],
+                    split.get("note"),
+                )
+                for split in splits
+            ],
+        )
+        updated_splits = _splits_for_transaction(conn, transaction_id)
+        conn.commit()
+    return _transaction_row_to_dict(row, updated_splits)
+
+
+def clear_transaction_splits(transaction_id: int) -> dict | None:
+    """Remove all split lines for one transaction."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            """
+            DELETE FROM transaction_splits
+            WHERE transaction_id = ?
+            """,
+            (transaction_id,),
+        )
+        conn.commit()
+    return _transaction_row_to_dict(row, [])
 
 
 def update_transaction_details(
@@ -1195,6 +1308,17 @@ def update_transaction_details(
 ) -> dict | None:
     """Update editable transaction details."""
     with connect() as conn:
+        current = conn.execute(
+            """
+            SELECT amount_cents
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        if current is None:
+            return None
+
         cursor = conn.execute(
             """
             UPDATE transactions
@@ -1209,6 +1333,14 @@ def update_transaction_details(
         )
         if cursor.rowcount == 0:
             return None
+        if int(current["amount_cents"]) != amount_cents or amount_cents >= 0:
+            conn.execute(
+                """
+                DELETE FROM transaction_splits
+                WHERE transaction_id = ?
+                """,
+                (transaction_id,),
+            )
 
         row = conn.execute(
             """
@@ -1218,13 +1350,21 @@ def update_transaction_details(
             """,
             (transaction_id,),
         ).fetchone()
+        transaction = _transaction_row_to_dict(row, _splits_for_transaction(conn, row["id"]))
         conn.commit()
-    return _transaction_row_to_dict(row)
+    return transaction
 
 
 def delete_transaction(transaction_id: int) -> bool:
     """Delete one transaction by id."""
     with connect() as conn:
+        conn.execute(
+            """
+            DELETE FROM transaction_splits
+            WHERE transaction_id = ?
+            """,
+            (transaction_id,),
+        )
         cursor = conn.execute(
             """
             DELETE FROM transactions
@@ -1239,6 +1379,7 @@ def delete_transaction(transaction_id: int) -> bool:
 def export_backup() -> dict:
     """Return a complete JSON-serializable snapshot of local finance data."""
     transactions = list_transactions(limit=100000)
+    transaction_split_count = sum(len(transaction["splits"]) for transaction in transactions)
     uploads = list_uploads(limit=100000)
     merchant_rules = list_merchant_rules()
     recurring_ignores = list_recurring_ignores()
@@ -1254,6 +1395,7 @@ def export_backup() -> dict:
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "counts": {
             "transactions": len(transactions),
+            "transaction_splits": transaction_split_count,
             "uploads": len(uploads),
             "merchant_rules": len(merchant_rules),
             "recurring_ignores": len(recurring_ignores),
@@ -1283,7 +1425,9 @@ def restore_backup(backup: dict) -> dict:
     if backup.get("schema_version") != 1:
         raise ValueError("Unsupported backup schema version.")
 
-    transactions = _restore_transactions(backup)
+    transaction_records = _restore_transactions(backup)
+    transactions = [record["transaction"] for record in transaction_records]
+    transaction_splits = [record["splits"] for record in transaction_records]
     uploads = _restore_uploads(backup)
     merchant_rules = _restore_merchant_rules(backup)
     recurring_ignores = _restore_recurring_ignores(backup)
@@ -1303,6 +1447,7 @@ def restore_backup(backup: dict) -> dict:
         raise ValueError("Backup contains duplicate budgets.")
 
     with connect() as conn:
+        conn.execute("DELETE FROM transaction_splits")
         conn.execute("DELETE FROM transactions")
         conn.execute("DELETE FROM upload_history")
         conn.execute("DELETE FROM merchant_rules")
@@ -1311,19 +1456,41 @@ def restore_backup(backup: dict) -> dict:
         conn.execute("DELETE FROM csv_import_presets")
         conn.execute("DELETE FROM budgets")
         conn.execute("DELETE FROM ask_history")
+        restored_transaction_ids = []
+        for transaction in transactions:
+            cursor = conn.execute(
+                """
+                INSERT INTO transactions (
+                    transaction_date,
+                    description,
+                    amount_cents,
+                    category,
+                    source_file,
+                    account_name
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                transaction,
+            )
+            restored_transaction_ids.append(cursor.lastrowid)
+        split_values = [
+            (transaction_id, *split)
+            for transaction_id, splits in zip(restored_transaction_ids, transaction_splits)
+            for split in splits
+        ]
         conn.executemany(
             """
-            INSERT INTO transactions (
-                transaction_date,
-                description,
-                amount_cents,
+            INSERT INTO transaction_splits (
+                transaction_id,
                 category,
-                source_file,
-                account_name
+                amount_cents,
+                note,
+                created_at,
+                updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
             """,
-            transactions,
+            split_values,
         )
         conn.executemany(
             """
@@ -1431,6 +1598,7 @@ def restore_backup(backup: dict) -> dict:
 
     return {
         "transactions": len(transactions),
+        "transaction_splits": sum(len(splits) for splits in transaction_splits),
         "uploads": len(uploads),
         "merchant_rules": len(merchant_rules),
         "recurring_ignores": len(recurring_ignores),
@@ -1519,6 +1687,8 @@ def category_review_queue(month: str | None = None, limit: int = 20) -> list[dic
 
         for row in rows:
             if int(row["amount_cents"]) > 0:
+                continue
+            if _splits_for_transaction(conn, row["id"]):
                 continue
 
             suggestion = category_suggestion_for_description(
@@ -1631,17 +1801,7 @@ def monthly_summary(month: str | None = None) -> dict:
             """,
             params,
         ).fetchone()
-        category_rows = conn.execute(
-            f"""
-            SELECT category, COALESCE(SUM(ABS(amount_cents)), 0) AS total_cents
-            FROM transactions
-            {where_sql}
-              {"AND" if where_sql else "WHERE"} amount_cents < 0
-            GROUP BY category
-            ORDER BY total_cents DESC
-            """,
-            params,
-        ).fetchall()
+    category_rows = _category_spending_totals(month=month)
 
     return {
         "month": month,
@@ -1690,22 +1850,7 @@ def available_months() -> list[dict]:
 
 def category_totals(month: str | None = None) -> list[dict]:
     """Return category totals and transaction counts for expenses."""
-    where_sql, params = _month_filter(month)
-    with connect() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT
-                category,
-                COALESCE(SUM(ABS(amount_cents)), 0) AS total_cents,
-                COUNT(*) AS transaction_count
-            FROM transactions
-            {where_sql}
-              {"AND" if where_sql else "WHERE"} amount_cents < 0
-            GROUP BY category
-            ORDER BY total_cents DESC
-            """,
-            params,
-        ).fetchall()
+    rows = _category_spending_totals(month=month)
 
     return [
         {
@@ -2229,19 +2374,69 @@ def spending_for_categories(categories: list[str], month: str | None = None) -> 
     if not categories:
         return 0
 
-    month_sql, month_params = _month_filter(month)
-    placeholders = ", ".join("?" for _ in categories)
-    category_clause = f"category IN ({placeholders})"
-    sql = f"""
-        SELECT COALESCE(SUM(ABS(amount_cents)), 0) AS spending_cents
-        FROM transactions
-        {month_sql}
-          {"AND" if month_sql else "WHERE"} amount_cents < 0
-          AND {category_clause}
-    """
+    return sum(
+        row["total_cents"]
+        for row in _category_spending_totals(month=month, categories=categories)
+    )
+
+
+def _category_spending_totals(month: str | None = None, categories: list[str] | None = None) -> list[dict]:
+    """Return category totals from split lines when present, or parent rows otherwise."""
+    first_filter, first_params = _expense_line_filters(month, alias="t")
+    second_filter, second_params = _expense_line_filters(month, alias="t")
+    category_where = ""
+    category_params: list[str] = []
+    if categories:
+        placeholders = ", ".join("?" for _ in categories)
+        category_where = f"WHERE category IN ({placeholders})"
+        category_params = categories
+
     with connect() as conn:
-        row = conn.execute(sql, [*month_params, *categories]).fetchone()
-    return int(row["spending_cents"])
+        rows = conn.execute(
+            f"""
+            WITH split_totals AS (
+                SELECT transaction_id, SUM(amount_cents) AS split_total_cents
+                FROM transaction_splits
+                GROUP BY transaction_id
+            ),
+            expense_lines AS (
+                SELECT
+                    t.id AS transaction_id,
+                    t.category AS category,
+                    ABS(t.amount_cents) AS amount_cents
+                FROM transactions t
+                LEFT JOIN split_totals st ON st.transaction_id = t.id
+                WHERE {first_filter}
+                  AND st.transaction_id IS NULL
+                UNION ALL
+                SELECT
+                    t.id AS transaction_id,
+                    s.category AS category,
+                    s.amount_cents AS amount_cents
+                FROM transactions t
+                JOIN transaction_splits s ON s.transaction_id = t.id
+                WHERE {second_filter}
+            )
+            SELECT
+                category,
+                COALESCE(SUM(amount_cents), 0) AS total_cents,
+                COUNT(DISTINCT transaction_id) AS transaction_count
+            FROM expense_lines
+            {category_where}
+            GROUP BY category
+            ORDER BY total_cents DESC
+            """,
+            [*first_params, *second_params, *category_params],
+        ).fetchall()
+
+    return [
+        {
+            "category": row["category"],
+            "total_cents": int(row["total_cents"]),
+            "transaction_count": row["transaction_count"],
+        }
+        for row in rows
+    ]
 
 
 def detect_anomalies(limit: int = 10, month: str | None = None) -> list[dict]:
@@ -2328,7 +2523,50 @@ def anomaly_transaction_key_from_row(row: sqlite3.Row) -> str:
     )
 
 
-def _transaction_row_to_dict(row: sqlite3.Row) -> dict:
+def _splits_for_transaction(conn: sqlite3.Connection, transaction_id: int) -> list[dict]:
+    return _splits_for_transactions(conn, [transaction_id]).get(transaction_id, [])
+
+
+def _splits_for_transactions(conn: sqlite3.Connection, transaction_ids: list[int]) -> dict[int, list[dict]]:
+    if not transaction_ids:
+        return {}
+
+    placeholders = ", ".join("?" for _ in transaction_ids)
+    rows = conn.execute(
+        f"""
+        SELECT id, transaction_id, category, amount_cents, note, created_at, updated_at
+        FROM transaction_splits
+        WHERE transaction_id IN ({placeholders})
+        ORDER BY id
+        """,
+        transaction_ids,
+    ).fetchall()
+
+    grouped: dict[int, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(row["transaction_id"], []).append(_split_row_to_dict(row))
+    return grouped
+
+
+def _split_row_to_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "transaction_id": row["transaction_id"],
+        "category": row["category"],
+        "amount": cents_to_dollars(row["amount_cents"]),
+        "note": row["note"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _transaction_row_to_dict(row: sqlite3.Row, splits: list[dict] | None = None) -> dict:
+    if splits is None:
+        with connect() as conn:
+            splits = _splits_for_transaction(conn, row["id"])
+
+    split_total = sum(_dollars_to_cents(split["amount"]) for split in splits)
+    expense_total = abs(int(row["amount_cents"])) if int(row["amount_cents"]) < 0 else 0
     return {
         "id": row["id"],
         "date": row["transaction_date"],
@@ -2337,6 +2575,10 @@ def _transaction_row_to_dict(row: sqlite3.Row) -> dict:
         "category": row["category"],
         "source_file": row["source_file"],
         "account_name": row["account_name"],
+        "splits": splits,
+        "is_split": bool(splits),
+        "split_total": cents_to_dollars(split_total),
+        "unsplit_amount": cents_to_dollars(max(expense_total - split_total, 0)),
     }
 
 
@@ -2455,19 +2697,43 @@ def _upload_row_to_dict(row: sqlite3.Row) -> dict:
     }
 
 
-def _restore_transactions(backup: dict) -> list[tuple]:
+def _restore_transactions(backup: dict) -> list[dict]:
     rows = []
     for index, item in enumerate(_backup_list(backup, "transactions"), start=1):
         record = _backup_object(item, f"transactions[{index}]")
-        rows.append((
-            _backup_date(record, "date", f"transactions[{index}]"),
-            _backup_required_text(record, "description", f"transactions[{index}]", max_length=200),
-            _backup_amount_cents(record, "amount", f"transactions[{index}]"),
-            _backup_required_text(record, "category", f"transactions[{index}]", max_length=80),
-            _backup_optional_text(record, "source_file", max_length=200),
-            _backup_optional_text(record, "account_name", max_length=80),
-        ))
+        amount_cents = _backup_amount_cents(record, "amount", f"transactions[{index}]")
+        rows.append({
+            "transaction": (
+                _backup_date(record, "date", f"transactions[{index}]"),
+                _backup_required_text(record, "description", f"transactions[{index}]", max_length=200),
+                amount_cents,
+                _backup_required_text(record, "category", f"transactions[{index}]", max_length=80),
+                _backup_optional_text(record, "source_file", max_length=200),
+                _backup_optional_text(record, "account_name", max_length=80),
+            ),
+            "splits": _restore_transaction_splits(record, f"transactions[{index}]", amount_cents),
+        })
     return rows
+
+
+def _restore_transaction_splits(record: dict, label: str, amount_cents: int) -> list[tuple]:
+    splits = []
+    for index, item in enumerate(_backup_list(record, "splits"), start=1):
+        split_label = f"{label}.splits[{index}]"
+        split = _backup_object(item, split_label)
+        splits.append((
+            _backup_required_text(split, "category", split_label, max_length=80),
+            _backup_positive_amount_cents(split, "amount", split_label),
+            _backup_optional_text(split, "note", max_length=120),
+            _backup_optional_text(split, "created_at", max_length=80),
+            _backup_optional_text(split, "updated_at", max_length=80),
+        ))
+
+    if splits and amount_cents >= 0:
+        raise ValueError(f"{label}.splits can only be used on expense transactions.")
+    if splits and sum(split[1] for split in splits) != abs(amount_cents):
+        raise ValueError(f"{label}.splits must total the transaction expense amount.")
+    return splits
 
 
 def _restore_uploads(backup: dict) -> list[tuple]:
@@ -2989,16 +3255,41 @@ def _category_spending_history(month: str, lookback: int = 3) -> dict[str, list[
                   AND substr(transaction_date, 1, 7) <= ?
                 ORDER BY month DESC
                 LIMIT ?
+            ),
+            split_totals AS (
+                SELECT transaction_id, SUM(amount_cents) AS split_total_cents
+                FROM transaction_splits
+                GROUP BY transaction_id
+            ),
+            expense_lines AS (
+                SELECT
+                    substr(t.transaction_date, 1, 7) AS month,
+                    t.id AS transaction_id,
+                    t.category AS category,
+                    ABS(t.amount_cents) AS amount_cents
+                FROM transactions t
+                JOIN recent_months rm ON rm.month = substr(t.transaction_date, 1, 7)
+                LEFT JOIN split_totals st ON st.transaction_id = t.id
+                WHERE t.amount_cents < 0
+                  AND st.transaction_id IS NULL
+                UNION ALL
+                SELECT
+                    substr(t.transaction_date, 1, 7) AS month,
+                    t.id AS transaction_id,
+                    s.category AS category,
+                    s.amount_cents AS amount_cents
+                FROM transactions t
+                JOIN recent_months rm ON rm.month = substr(t.transaction_date, 1, 7)
+                JOIN transaction_splits s ON s.transaction_id = t.id
+                WHERE t.amount_cents < 0
             )
             SELECT
-                substr(t.transaction_date, 1, 7) AS month,
-                t.category,
-                COALESCE(SUM(ABS(t.amount_cents)), 0) AS total_cents,
-                COUNT(*) AS transaction_count
-            FROM transactions t
-            JOIN recent_months rm ON rm.month = substr(t.transaction_date, 1, 7)
-            WHERE t.amount_cents < 0
-            GROUP BY month, t.category
+                month,
+                category,
+                COALESCE(SUM(amount_cents), 0) AS total_cents,
+                COUNT(DISTINCT transaction_id) AS transaction_count
+            FROM expense_lines
+            GROUP BY month, category
             ORDER BY month DESC, total_cents DESC
             """,
             (month, lookback),
@@ -3340,6 +3631,16 @@ def _month_filter(month: str | None) -> tuple[str, list[str]]:
     )
 
 
+def _expense_line_filters(month: str | None, alias: str = "transactions") -> tuple[str, list[str]]:
+    clauses = [f"{alias}.amount_cents < 0"]
+    params = []
+    if month:
+        start, end = _month_bounds(month)
+        clauses.append(f"{alias}.transaction_date >= ? AND {alias}.transaction_date < ?")
+        params.extend([start.isoformat(), end.isoformat()])
+    return " AND ".join(clauses), params
+
+
 def _transaction_filter(
     month: str | None = None,
     category: str | None = None,
@@ -3354,8 +3655,27 @@ def _transaction_filter(
         clauses.append("transaction_date >= ? AND transaction_date < ?")
         params.extend(month_params)
     if category:
-        clauses.append("category = ?")
-        params.append(category)
+        clauses.append(
+            """
+            (
+                (
+                    category = ?
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM transaction_splits
+                        WHERE transaction_splits.transaction_id = transactions.id
+                    )
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM transaction_splits
+                    WHERE transaction_splits.transaction_id = transactions.id
+                      AND transaction_splits.category = ?
+                )
+            )
+            """
+        )
+        params.extend([category, category])
     if search:
         clauses.append("lower(description) LIKE ?")
         params.append(f"%{search.strip().lower()}%")

@@ -1358,6 +1358,12 @@ h2 {
   font-weight: 800;
 }
 
+.transaction-description small {
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
 .transaction-actions {
   display: flex;
   align-items: center;
@@ -1376,6 +1382,13 @@ h2 {
   padding: 3px 8px;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.split-pill {
+  justify-content: center;
+  width: 100%;
+  background: #f0f7ff;
+  color: var(--blue);
 }
 
 .category-editor {
@@ -1500,6 +1513,112 @@ h2 {
 .modal-actions button[type="submit"] {
   background: var(--accent);
   color: #fff;
+}
+
+.split-editor {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.split-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.split-editor-header strong,
+.split-editor-header span {
+  display: block;
+}
+
+.split-editor-header strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.split-editor-header span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.split-editor-header button {
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.split-lines {
+  display: grid;
+  gap: 8px;
+}
+
+.split-line {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 104px minmax(120px, 1fr) 32px;
+  gap: 8px;
+  align-items: center;
+}
+
+.split-line input,
+.split-line select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  padding: 7px 8px;
+  font-size: 0.8rem;
+}
+
+.split-balance {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: #f8fafb;
+  padding: 9px 10px;
+}
+
+.split-balance span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.split-balance b {
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.split-balanced {
+  border-color: rgba(33, 115, 70, 0.25);
+  background: #eef8f2;
+}
+
+.split-unbalanced {
+  border-color: rgba(164, 95, 32, 0.28);
+  background: #fff7ed;
+}
+
+.split-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.split-actions button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
 }
 
 .rule-row {
@@ -1670,6 +1789,20 @@ h2 {
 
   .transaction-edit-form {
     grid-template-columns: 1fr;
+  }
+
+  .split-editor-header,
+  .split-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .split-line {
+    grid-template-columns: 1fr;
+  }
+
+  .split-line .row-icon-button {
+    justify-self: end;
   }
 
   .modal-actions {
