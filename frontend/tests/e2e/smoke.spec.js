@@ -78,6 +78,12 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   const categoryReviewPanel = page.locator(".category-review-panel");
   await expect(categoryReviewPanel.getByText("AI Assist sends transaction descriptions")).toBeVisible();
   await expect(categoryReviewPanel.getByRole("button", { name: "AI Assist" })).toBeDisabled();
+  await categoryReviewPanel.getByLabel("Dismiss category suggestion for Trader Joes").click();
+  await expect(page.getByTestId("status-message")).toHaveText("Dismissed category suggestion for Trader Joes.");
+  await expect(categoryReviewPanel.getByLabel("Restore category suggestion for Trader Joes")).toBeVisible();
+  await categoryReviewPanel.getByLabel("Restore category suggestion for Trader Joes").click();
+  await expect(page.getByTestId("status-message")).toHaveText("Restored category suggestion for Trader Joes.");
+  await expect(categoryReviewPanel.getByLabel("Dismiss category suggestion for Trader Joes")).toBeVisible();
   const transactionsPanel = page.getByTestId("transactions-panel");
   const modal = page.getByTestId("transaction-modal");
   await expect(transactionsPanel.getByText("Trader Joes")).toBeVisible();

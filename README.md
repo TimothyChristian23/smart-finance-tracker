@@ -23,6 +23,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Optional OpenAI-powered AI Assist for import preview and review-only category suggestions
 - Editable transaction categories
 - Category review queue with confidence-scored suggestions
+- Dismissible category suggestions that can be restored when the app gets it wrong
 - Saved normalized merchant rules that apply to future imports
 - Direct merchant rule creation with optional retroactive category updates
 - Editable transaction details for date, description, signed amount, category, and account
@@ -33,7 +34,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Recurring charge and subscription detection with hide/restore controls
 - Recurring bill calendar for expected upcoming charges
 - Transaction search, category filtering, and CSV export
-- Full local JSON backup export for transactions, transaction splits, uploads, budgets, merchant rules, CSV mapping presets, recurring ignore preferences, anomaly dismissals, and Q&A history
+- Full local JSON backup export for transactions, transaction splits, uploads, budgets, merchant rules, category review dismissals, CSV mapping presets, recurring ignore preferences, anomaly dismissals, and Q&A history
 - Guarded JSON backup restore for moving or recovering local development data
 - Guarded local data reset with typed confirmation
 - Monthly spending summaries
@@ -148,6 +149,9 @@ GET  /uploads
 GET  /imports/quality?month=2026-07
 GET  /ai/categorization/status
 POST /categories/review/ai?month=2026-07
+GET  /categories/review/ignored
+POST /categories/review/{transaction_id}/ignore
+DELETE /categories/review/ignored/{ignore_id}
 GET  /csv-mapping-presets
 POST /transactions
 POST /transactions/preview
@@ -283,7 +287,9 @@ more likely category when the local classifier has enough signal. Preview rows
 and review items include confidence, source, matched merchant signals, and a short
 reason. Ask `Why was Trader Joes categorized as Food & Grocery in July 2026?` to
 get the same explanation through Q&A. Applying a suggestion can also save a
-merchant rule for future imports.
+merchant rule for future imports. Dismissing a suggestion teaches the local
+review queue to stop showing that merchant/current-category/suggested-category
+pair until it is restored.
 Merchant rules can also be created from the dashboard or `PUT /merchant-rules`;
 turn on `apply_existing` to recategorize matching transactions already in SQLite.
 

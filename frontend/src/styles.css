@@ -1236,8 +1236,16 @@ h2 {
   white-space: nowrap;
 }
 
+.category-review-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .category-review-action button,
-.category-review-action > span {
+.category-review-action > span,
+.category-review-buttons > span {
   display: inline-flex;
   min-height: 34px;
   align-items: center;
@@ -1253,7 +1261,24 @@ h2 {
   color: #fff;
 }
 
-.category-review-action > span {
+.category-review-action .row-icon-button {
+  width: 34px;
+  padding: 0;
+  background: #fff;
+  color: var(--muted);
+}
+
+.ignored-category-review-list {
+  margin-top: 9px;
+}
+
+.ignored-category-review-row {
+  border-left-color: var(--muted);
+  background: #fbfcfd;
+}
+
+.category-review-action > span,
+.category-review-buttons > span {
   border: 1px solid var(--line);
   color: var(--muted);
 }

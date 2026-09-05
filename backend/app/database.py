@@ -155,6 +155,20 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS category_review_ignores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            merchant_key TEXT NOT NULL,
+            merchant_name TEXT NOT NULL,
+            current_category TEXT NOT NULL,
+            suggested_category TEXT NOT NULL,
+            category_source TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(merchant_key, current_category, suggested_category)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS recurring_ignores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             merchant_key TEXT NOT NULL UNIQUE,
@@ -287,6 +301,7 @@ def reset_all_data() -> None:
         conn.execute("DELETE FROM transactions")
         conn.execute("DELETE FROM upload_history")
         conn.execute("DELETE FROM merchant_rules")
+        conn.execute("DELETE FROM category_review_ignores")
         conn.execute("DELETE FROM recurring_ignores")
         conn.execute("DELETE FROM anomaly_ignores")
         conn.execute("DELETE FROM csv_import_presets")
@@ -594,12 +609,13 @@ def category_suggestion_for_description(
     description: str,
     amount_cents: int,
     current_category: str,
+    honor_ignores: bool = True,
 ) -> dict:
     """Return an explainable category suggestion, including saved-rule evidence."""
     rule_category = merchant_rule_for_description(conn, description)
     merchant_name = clean_merchant_description(description)
     if rule_category:
-        return {
+        suggestion = {
             "category": rule_category,
             "confidence": 0.99,
             "confidence_label": "high",
@@ -607,7 +623,24 @@ def category_suggestion_for_description(
             "matched_terms": [merchant_name],
             "reason": f"Saved merchant rule maps {merchant_name} to {rule_category}.",
         }
-    return suggest_category(description, amount_cents, current_category)
+    else:
+        suggestion = suggest_category(description, amount_cents, current_category)
+
+    if honor_ignores and category_review_suggestion_ignored(
+        conn,
+        description,
+        current_category,
+        suggestion["category"],
+    ):
+        return {
+            "category": current_category,
+            "confidence": 0.99,
+            "confidence_label": "high",
+            "source": "user_preference",
+            "matched_terms": [merchant_name],
+            "reason": f"Dismissed {suggestion['category']} suggestion for {merchant_name}; keeping {current_category}.",
+        }
+    return suggestion
 
 
 def list_merchant_rules() -> list[dict]:
@@ -740,6 +773,113 @@ def delete_merchant_rule(rule_id: int) -> bool:
         )
         conn.commit()
     return cursor.rowcount > 0
+
+
+def list_category_review_ignores() -> list[dict]:
+    """Return category suggestions the user dismissed."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, merchant_name, merchant_key, current_category, suggested_category, category_source, created_at
+            FROM category_review_ignores
+            ORDER BY created_at DESC, id DESC
+            """
+        ).fetchall()
+    return [_category_review_ignore_row_to_dict(row) for row in rows]
+
+
+def ignore_category_review_suggestion(transaction_id: int) -> dict | None:
+    """Dismiss the current category review suggestion for a transaction."""
+    with connect() as conn:
+        transaction = conn.execute(
+            """
+            SELECT id, transaction_date, description, amount_cents, category, source_file, account_name
+            FROM transactions
+            WHERE id = ?
+            """,
+            (transaction_id,),
+        ).fetchone()
+        if transaction is None:
+            return None
+
+        suggestion = category_suggestion_for_description(
+            conn,
+            transaction["description"],
+            int(transaction["amount_cents"]),
+            transaction["category"],
+            honor_ignores=False,
+        )
+        merchant_name = clean_merchant_description(transaction["description"])
+        target_key = merchant_key(merchant_name)
+        conn.execute(
+            """
+            INSERT INTO category_review_ignores (
+                merchant_key,
+                merchant_name,
+                current_category,
+                suggested_category,
+                category_source
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(merchant_key, current_category, suggested_category) DO UPDATE SET
+                merchant_name = excluded.merchant_name,
+                category_source = excluded.category_source
+            """,
+            (
+                target_key,
+                merchant_name,
+                transaction["category"],
+                suggestion["category"],
+                suggestion["source"],
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT id, merchant_name, merchant_key, current_category, suggested_category, category_source, created_at
+            FROM category_review_ignores
+            WHERE merchant_key = ?
+              AND current_category = ?
+              AND suggested_category = ?
+            """,
+            (target_key, transaction["category"], suggestion["category"]),
+        ).fetchone()
+    return _category_review_ignore_row_to_dict(row)
+
+
+def delete_category_review_ignore(ignore_id: int) -> bool:
+    """Restore a dismissed category suggestion by ignore id."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM category_review_ignores
+            WHERE id = ?
+            """,
+            (ignore_id,),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+
+def category_review_suggestion_ignored(
+    conn: sqlite3.Connection,
+    description: str,
+    current_category: str,
+    suggested_category: str,
+) -> bool:
+    """Return whether the user rejected this merchant/category suggestion."""
+    row = conn.execute(
+        """
+        SELECT id
+        FROM category_review_ignores
+        WHERE merchant_key = ?
+          AND current_category = ?
+          AND suggested_category = ?
+        LIMIT 1
+        """,
+        (merchant_key(description), current_category, suggested_category),
+    ).fetchone()
+    return row is not None
 
 
 def list_recurring_ignores() -> list[dict]:
@@ -1382,6 +1522,7 @@ def export_backup() -> dict:
     transaction_split_count = sum(len(transaction["splits"]) for transaction in transactions)
     uploads = list_uploads(limit=100000)
     merchant_rules = list_merchant_rules()
+    category_review_ignores = list_category_review_ignores()
     recurring_ignores = list_recurring_ignores()
     anomaly_ignores = list_anomaly_ignores()
     csv_import_presets = list_csv_import_presets()
@@ -1398,6 +1539,7 @@ def export_backup() -> dict:
             "transaction_splits": transaction_split_count,
             "uploads": len(uploads),
             "merchant_rules": len(merchant_rules),
+            "category_review_ignores": len(category_review_ignores),
             "recurring_ignores": len(recurring_ignores),
             "anomaly_ignores": len(anomaly_ignores),
             "csv_import_presets": len(csv_import_presets),
@@ -1410,6 +1552,7 @@ def export_backup() -> dict:
         "transactions": transactions,
         "budgets": budgets,
         "merchant_rules": merchant_rules,
+        "category_review_ignores": category_review_ignores,
         "recurring_ignores": recurring_ignores,
         "anomaly_ignores": anomaly_ignores,
         "csv_import_presets": csv_import_presets,
@@ -1430,6 +1573,7 @@ def restore_backup(backup: dict) -> dict:
     transaction_splits = [record["splits"] for record in transaction_records]
     uploads = _restore_uploads(backup)
     merchant_rules = _restore_merchant_rules(backup)
+    category_review_ignores = _restore_category_review_ignores(backup)
     recurring_ignores = _restore_recurring_ignores(backup)
     anomaly_ignores = _restore_anomaly_ignores(backup)
     csv_import_presets = _restore_csv_import_presets(backup)
@@ -1437,6 +1581,8 @@ def restore_backup(backup: dict) -> dict:
     ask_history = _restore_ask_history(backup)
     if len({row[0] for row in merchant_rules}) != len(merchant_rules):
         raise ValueError("Backup contains duplicate merchant rules.")
+    if len({(row[0], row[2], row[3]) for row in category_review_ignores}) != len(category_review_ignores):
+        raise ValueError("Backup contains duplicate category review dismissals.")
     if len({row[0] for row in recurring_ignores}) != len(recurring_ignores):
         raise ValueError("Backup contains duplicate recurring ignores.")
     if len({row[0] for row in anomaly_ignores}) != len(anomaly_ignores):
@@ -1451,6 +1597,7 @@ def restore_backup(backup: dict) -> dict:
         conn.execute("DELETE FROM transactions")
         conn.execute("DELETE FROM upload_history")
         conn.execute("DELETE FROM merchant_rules")
+        conn.execute("DELETE FROM category_review_ignores")
         conn.execute("DELETE FROM recurring_ignores")
         conn.execute("DELETE FROM anomaly_ignores")
         conn.execute("DELETE FROM csv_import_presets")
@@ -1521,6 +1668,20 @@ def restore_backup(backup: dict) -> dict:
             VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
             """,
             merchant_rules,
+        )
+        conn.executemany(
+            """
+            INSERT INTO category_review_ignores (
+                merchant_key,
+                merchant_name,
+                current_category,
+                suggested_category,
+                category_source,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            category_review_ignores,
         )
         conn.executemany(
             """
@@ -1601,6 +1762,7 @@ def restore_backup(backup: dict) -> dict:
         "transaction_splits": sum(len(splits) for splits in transaction_splits),
         "uploads": len(uploads),
         "merchant_rules": len(merchant_rules),
+        "category_review_ignores": len(category_review_ignores),
         "recurring_ignores": len(recurring_ignores),
         "anomaly_ignores": len(anomaly_ignores),
         "csv_import_presets": len(csv_import_presets),
@@ -1697,6 +1859,8 @@ def category_review_queue(month: str | None = None, limit: int = 20) -> list[dic
                 int(row["amount_cents"]),
                 row["category"],
             )
+            if suggestion["source"] == "user_preference":
+                continue
             needs_review = (
                 row["category"] == "Other"
                 or suggestion["category"] != row["category"]
@@ -2592,6 +2756,20 @@ def _merchant_rule_row_to_dict(row: sqlite3.Row) -> dict:
     }
 
 
+def _category_review_ignore_row_to_dict(row: sqlite3.Row) -> dict:
+    category_source = row["category_source"] or "category_signals"
+    return {
+        "id": row["id"],
+        "merchant": row["merchant_name"],
+        "merchant_key": row["merchant_key"],
+        "current_category": row["current_category"],
+        "suggested_category": row["suggested_category"],
+        "category_source": category_source,
+        "category_source_label": explain_category_source(category_source),
+        "created_at": row["created_at"],
+    }
+
+
 def _recurring_ignore_row_to_dict(row: sqlite3.Row) -> dict:
     return {
         "id": row["id"],
@@ -2771,6 +2949,27 @@ def _restore_merchant_rules(backup: dict) -> list[tuple]:
             _backup_required_text(record, "category", f"merchant_rules[{index}]", max_length=80),
             updated_at,
             updated_at,
+        ))
+    return rows
+
+
+def _restore_category_review_ignores(backup: dict) -> list[tuple]:
+    rows = []
+    for index, item in enumerate(_backup_list(backup, "category_review_ignores"), start=1):
+        record = _backup_object(item, f"category_review_ignores[{index}]")
+        merchant_name = clean_merchant_description(
+            _backup_required_text(record, "merchant", f"category_review_ignores[{index}]", max_length=200)
+        )
+        merchant_key_value = merchant_key(
+            _backup_optional_text(record, "merchant_key", max_length=200) or merchant_name
+        )
+        rows.append((
+            merchant_key_value,
+            merchant_name,
+            _backup_required_text(record, "current_category", f"category_review_ignores[{index}]", max_length=80),
+            _backup_required_text(record, "suggested_category", f"category_review_ignores[{index}]", max_length=80),
+            _backup_optional_text(record, "category_source", max_length=80),
+            _backup_optional_text(record, "created_at", max_length=80),
         ))
     return rows
 

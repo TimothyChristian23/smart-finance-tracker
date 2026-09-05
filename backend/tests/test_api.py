@@ -826,6 +826,11 @@ def test_data_export_backup_includes_local_finance_records():
     )
     client.patch(
         f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": False},
+    )
+    client.post(f"/categories/review/{transaction['id']}/ignore")
+    client.patch(
+        f"/transactions/{transaction['id']}/category",
         json={"category": "Dining", "remember": True},
     )
     client.put(
@@ -852,6 +857,7 @@ def test_data_export_backup_includes_local_finance_records():
         "transaction_splits": 0,
         "uploads": 1,
         "merchant_rules": 1,
+        "category_review_ignores": 1,
         "recurring_ignores": 1,
         "anomaly_ignores": 1,
         "csv_import_presets": 1,
@@ -863,6 +869,9 @@ def test_data_export_backup_includes_local_finance_records():
     assert payload["months"][0]["month"] == "2026-07"
     assert payload["uploads"][0]["filename"] == "sample.csv"
     assert payload["merchant_rules"][0]["merchant"] == "Trader Joes"
+    assert payload["category_review_ignores"][0]["merchant"] == "Trader Joes"
+    assert payload["category_review_ignores"][0]["current_category"] == "Dining"
+    assert payload["category_review_ignores"][0]["suggested_category"] == "Food & Grocery"
     assert payload["recurring_ignores"][0]["merchant"] == "Netflix Subscription"
     assert payload["anomaly_ignores"][0]["transaction"]["description"] == "One-Time Electronics Store"
     assert payload["csv_import_presets"][0]["name"] == "Travel Checking"
@@ -883,6 +892,11 @@ def test_data_import_restores_backup_and_recalculates_analytics():
         item for item in client.get("/transactions").json()
         if item["description"] == "Trader Joes"
     )
+    client.patch(
+        f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": False},
+    )
+    client.post(f"/categories/review/{transaction['id']}/ignore")
     client.patch(
         f"/transactions/{transaction['id']}/category",
         json={"category": "Dining", "remember": True},
@@ -915,6 +929,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
             "transaction_splits": 0,
             "uploads": 1,
             "merchant_rules": 1,
+            "category_review_ignores": 1,
             "recurring_ignores": 1,
             "anomaly_ignores": 1,
             "csv_import_presets": 1,
@@ -928,6 +943,7 @@ def test_data_import_restores_backup_and_recalculates_analytics():
     assert summary["transaction_count"] == 11
     assert client.get("/uploads").json()[0]["account_name"] == "Chase Checking"
     assert client.get("/merchant-rules").json()[0]["merchant"] == "Trader Joes"
+    assert client.get("/categories/review/ignored").json()[0]["merchant"] == "Trader Joes"
     assert client.get("/recurring/ignored").json()[0]["merchant"] == "Netflix Subscription"
     assert client.get("/anomalies/ignored").json()[0]["transaction"]["description"] == "One-Time Electronics Store"
     assert client.get("/csv-mapping-presets").json()[0]["name"] == "Travel Checking"
@@ -1052,6 +1068,11 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
     )
     client.patch(
         f"/transactions/{transaction['id']}/category",
+        json={"category": "Dining", "remember": False},
+    )
+    client.post(f"/categories/review/{transaction['id']}/ignore")
+    client.patch(
+        f"/transactions/{transaction['id']}/category",
         json={"category": "Dining", "remember": True},
     )
     client.put(
@@ -1083,6 +1104,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
         "transaction_splits": 0,
         "uploads": 0,
         "merchant_rules": 0,
+        "category_review_ignores": 0,
         "recurring_ignores": 0,
         "anomaly_ignores": 0,
         "csv_import_presets": 0,
@@ -1093,6 +1115,7 @@ def test_clear_all_data_requires_confirmation_and_removes_local_records():
     assert client.get("/transactions").json() == []
     assert client.get("/uploads").json() == []
     assert client.get("/merchant-rules").json() == []
+    assert client.get("/categories/review/ignored").json() == []
     assert client.get("/recurring/ignored").json() == []
     assert client.get("/anomalies/ignored").json() == []
     assert client.get("/csv-mapping-presets").json() == []
@@ -1258,6 +1281,46 @@ def test_category_review_queue_suggests_uncertain_updates():
         item["transaction"]["description"]
         for item in updated_queue
     }
+
+
+def test_category_review_suggestions_can_be_dismissed_and_restored():
+    client.post("/transactions/upload", files={"file": ("recurring.csv", RECURRING_CSV, "text/csv")})
+    queue = client.get("/categories/review?month=2026-07").json()
+    gym = next(
+        item for item in queue
+        if item["transaction"]["description"] == "Gym Membership"
+    )
+
+    response = client.post(f"/categories/review/{gym['transaction']['id']}/ignore")
+
+    assert response.status_code == 200
+    ignored = response.json()
+    assert ignored["merchant"] == "Gym Membership"
+    assert ignored["current_category"] == "Other"
+    assert ignored["suggested_category"] == "Health"
+    assert ignored["category_source"] == "category_signals"
+    assert ignored["category_source_label"] == "Category signals"
+
+    updated_queue = client.get("/categories/review?month=2026-07").json()
+    assert "Gym Membership" not in {
+        item["transaction"]["description"]
+        for item in updated_queue
+    }
+    assert client.get("/imports/quality?month=2026-07").json()["review_count"] == 1
+    ignored_list = client.get("/categories/review/ignored").json()
+    assert ignored_list[0]["merchant"] == "Gym Membership"
+
+    restore_response = client.delete(f"/categories/review/ignored/{ignored['id']}")
+
+    assert restore_response.status_code == 200
+    restored_queue = client.get("/categories/review?month=2026-07").json()
+    assert "Gym Membership" in {
+        item["transaction"]["description"]
+        for item in restored_queue
+    }
+    assert client.get("/categories/review/ignored").json() == []
+    assert client.delete(f"/categories/review/ignored/{ignored['id']}").status_code == 404
+    assert client.post("/categories/review/999999/ignore").status_code == 404
 
 
 def test_ai_categorization_status_and_disabled_review_guard():

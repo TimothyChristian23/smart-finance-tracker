@@ -40,6 +40,7 @@ from app.database import (
     clear_transaction_splits,
     delete_anomaly_ignore,
     delete_budget,
+    delete_category_review_ignore,
     delete_csv_import_preset,
     delete_merchant_rule,
     delete_recurring_ignore,
@@ -48,6 +49,7 @@ from app.database import (
     export_backup,
     get_csv_import_preset,
     get_transaction,
+    ignore_category_review_suggestion,
     ignore_recurring_merchant,
     import_quality_report,
     insert_transactions,
@@ -56,6 +58,7 @@ from app.database import (
     list_accounts,
     list_anomaly_ignores,
     list_ask_history,
+    list_category_review_ignores,
     list_csv_import_presets,
     list_merchant_rules,
     list_recurring_ignores,
@@ -187,6 +190,7 @@ class DataRestoreCounts(BaseModel):
     transaction_splits: int = 0
     uploads: int
     merchant_rules: int
+    category_review_ignores: int = 0
     recurring_ignores: int
     anomaly_ignores: int
     csv_import_presets: int
@@ -270,6 +274,17 @@ class CategoryReviewResponse(BaseModel):
     matched_terms: list[str] = Field(default_factory=list)
     reason: str
     action: str
+
+
+class CategoryReviewIgnoreResponse(BaseModel):
+    id: int
+    merchant: str
+    merchant_key: str
+    current_category: str
+    suggested_category: str
+    category_source: str
+    category_source_label: str
+    created_at: str
 
 
 class AICategorizationStatusResponse(BaseModel):
@@ -919,6 +934,11 @@ async def category_review(month: str | None = None, limit: int = 20) -> list[dic
     return category_review_queue(month=validate_month(month), limit=bounded_limit(limit))
 
 
+@app.get("/categories/review/ignored", response_model=list[CategoryReviewIgnoreResponse])
+async def ignored_category_reviews() -> list[dict]:
+    return list_category_review_ignores()
+
+
 @app.get("/ai/categorization/status", response_model=AICategorizationStatusResponse)
 async def ai_category_status() -> dict:
     return ai_categorization_status()
@@ -939,6 +959,21 @@ def ai_category_review(month: str | None = None, limit: int = 20) -> dict:
         "warning": AI_CATEGORY_WARNING,
         "suggestions": suggestions,
     }
+
+
+@app.post("/categories/review/{transaction_id}/ignore", response_model=CategoryReviewIgnoreResponse)
+async def ignore_category_review(transaction_id: int) -> dict:
+    ignored = ignore_category_review_suggestion(transaction_id)
+    if ignored is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    return ignored
+
+
+@app.delete("/categories/review/ignored/{ignore_id}")
+async def restore_category_review(ignore_id: int) -> dict:
+    if not delete_category_review_ignore(ignore_id):
+        raise HTTPException(status_code=404, detail="Category review dismissal not found.")
+    return {"message": "Category review suggestion restored."}
 
 
 @app.get("/merchant-rules", response_model=list[MerchantRuleResponse])

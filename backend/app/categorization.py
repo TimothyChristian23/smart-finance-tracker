@@ -160,6 +160,7 @@ CATEGORY_SOURCE_LABELS = {
     "fallback": "Needs review",
     "keyword_rule": "Merchant keyword",
     "saved_rule": "Saved merchant rule",
+    "user_preference": "User preference",
 }
 
 QUESTION_CATEGORY_KEYWORDS = {

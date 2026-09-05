@@ -66,6 +66,7 @@ export default function App() {
   const [accounts, setAccounts] = useState([]);
   const [accountSummary, setAccountSummary] = useState([]);
   const [categoryReview, setCategoryReview] = useState([]);
+  const [ignoredCategoryReviews, setIgnoredCategoryReviews] = useState([]);
   const [aiCategoryStatus, setAiCategoryStatus] = useState(emptyAICategoryStatus());
   const [merchantRules, setMerchantRules] = useState([]);
   const [csvPresets, setCsvPresets] = useState([]);
@@ -102,6 +103,7 @@ export default function App() {
     || budgets.length
     || merchantRules.length
     || csvPresets.length
+    || ignoredCategoryReviews.length
     || ignoredRecurring.length
     || ignoredAnomalies.length
     || askHistory.length
@@ -132,6 +134,7 @@ export default function App() {
         accountPayload,
         accountSummaryPayload,
         categoryReviewPayload,
+        ignoredCategoryReviewPayload,
         aiCategoryStatusPayload,
         merchantRulesPayload,
         csvPresetsPayload,
@@ -164,6 +167,7 @@ export default function App() {
         request("/accounts"),
         request(`/accounts/summary${queryString({ month: activeMonth })}`),
         request(`/categories/review${queryString({ month: activeMonth, limit: 6 })}`),
+        request("/categories/review/ignored"),
         request("/ai/categorization/status"),
         request("/merchant-rules"),
         request("/csv-mapping-presets"),
@@ -192,6 +196,7 @@ export default function App() {
       setAccounts(accountPayload);
       setAccountSummary(accountSummaryPayload);
       setCategoryReview(categoryReviewPayload);
+      setIgnoredCategoryReviews(ignoredCategoryReviewPayload);
       setAiCategoryStatus(aiCategoryStatusPayload);
       setMerchantRules(merchantRulesPayload);
       setCsvPresets(csvPresetsPayload);
@@ -402,7 +407,7 @@ export default function App() {
       setUploadStatus("Type RESET first.");
       return;
     }
-    if (!window.confirm("Reset all local finance data? This deletes transactions, transaction splits, upload history, budgets, merchant rules, CSV mapping presets, recurring ignores, anomaly dismissals, and Q&A history.")) return;
+    if (!window.confirm("Reset all local finance data? This deletes transactions, transaction splits, upload history, budgets, merchant rules, category review dismissals, CSV mapping presets, recurring ignores, anomaly dismissals, and Q&A history.")) return;
 
     setBusy(true);
     try {
@@ -418,6 +423,7 @@ export default function App() {
       setRuleDraft(emptyRuleDraft());
       setCsvPresetDraft(emptyCsvPresetDraft());
       setCsvPresets([]);
+      setIgnoredCategoryReviews([]);
       setIgnoredRecurring([]);
       setIgnoredAnomalies([]);
       setTransactionFilters({ account: "", category: "", search: "" });
@@ -845,6 +851,32 @@ export default function App() {
     await handleCategoryChange(item.transaction, item.suggested_category, true);
   }
 
+  async function handleDismissCategorySuggestion(item) {
+    setBusy(true);
+    try {
+      const ignored = await request(`/categories/review/${item.transaction.id}/ignore`, { method: "POST" });
+      await refreshDashboard();
+      setUploadStatus(`Dismissed category suggestion for ${ignored.merchant}.`);
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRestoreCategorySuggestion(ignore) {
+    setBusy(true);
+    try {
+      await request(`/categories/review/ignored/${ignore.id}`, { method: "DELETE" });
+      await refreshDashboard();
+      setUploadStatus(`Restored category suggestion for ${ignore.merchant}.`);
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleAICategoryReview() {
     if (!window.confirm(`${AI_CATEGORY_WARNING_TEXT}\n\nContinue?`)) return;
 
@@ -997,9 +1029,12 @@ export default function App() {
           <CategoryReviewList
             aiStatus={aiCategoryStatus}
             busy={busy || updatingTransactionId !== null}
+            ignored={ignoredCategoryReviews}
             items={categoryReview}
             onAskAI={handleAICategoryReview}
             onApply={handleApplyCategorySuggestion}
+            onDismiss={handleDismissCategorySuggestion}
+            onRestore={handleRestoreCategorySuggestion}
           />
         </section>
 
@@ -1400,7 +1435,7 @@ function BudgetRecommendationList({ busy, onApply, recommendations }) {
   );
 }
 
-function CategoryReviewList({ aiStatus, busy, items, onAskAI, onApply }) {
+function CategoryReviewList({ aiStatus, busy, ignored, items, onAskAI, onApply, onDismiss, onRestore }) {
   return (
     <div className="category-review-stack">
       <div className="ai-review-callout">
@@ -1434,14 +1469,51 @@ function CategoryReviewList({ aiStatus, busy, items, onAskAI, onApply }) {
               </div>
               <div className="category-review-action">
                 <b>{money(Math.abs(item.transaction.amount))}</b>
-                {item.action === "update" ? (
-                  <button disabled={busy} onClick={() => onApply(item)} type="button">
-                    <Check size={15} />
-                    Apply
+                <div className="category-review-buttons">
+                  {item.action === "update" ? (
+                    <button disabled={busy} onClick={() => onApply(item)} type="button">
+                      <Check size={15} />
+                      Apply
+                    </button>
+                  ) : (
+                    <span>Review</span>
+                  )}
+                  <button
+                    aria-label={`Dismiss category suggestion for ${item.transaction.description}`}
+                    className="row-icon-button category-dismiss-button"
+                    disabled={busy}
+                    onClick={() => onDismiss(item)}
+                    title="Dismiss suggestion"
+                    type="button"
+                  >
+                    <X size={15} />
                   </button>
-                ) : (
-                  <span>Review</span>
-                )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!!ignored.length && (
+        <div className="list ignored-category-review-list" aria-label="Dismissed category suggestions">
+          {ignored.map((item) => (
+            <div className="list-row category-review-row ignored-category-review-row" key={item.id}>
+              <div>
+                <strong>{item.merchant}</strong>
+                <span>Dismissed {item.current_category} to {item.suggested_category}</span>
+                <small>{item.category_source_label || "Category signal"} suggestion</small>
+              </div>
+              <div className="category-review-action">
+                <button
+                  aria-label={`Restore category suggestion for ${item.merchant}`}
+                  className="row-icon-button"
+                  disabled={busy}
+                  onClick={() => onRestore(item)}
+                  title="Restore suggestion"
+                  type="button"
+                >
+                  <RefreshCw size={15} />
+                </button>
               </div>
             </div>
           ))}
