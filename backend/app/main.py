@@ -129,6 +129,15 @@ class ImportPreviewCategory(BaseModel):
     transaction_count: int
 
 
+class ImportPreviewDiagnostics(BaseModel):
+    parser: str
+    total_lines: int = 0
+    parsed_rows: int = 0
+    skipped_lines: int = 0
+    skipped_examples: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class ImportPreviewResponse(BaseModel):
     filename: str
     file_type: str
@@ -143,6 +152,7 @@ class ImportPreviewResponse(BaseModel):
     categories: list[ImportPreviewCategory]
     rows: list[ImportPreviewRow]
     errors: list[str] = Field(default_factory=list)
+    diagnostics: ImportPreviewDiagnostics | None = None
 
 
 class ReviewedImportRowRequest(BaseModel):
@@ -612,6 +622,50 @@ CREDIT_COLUMNS = [
 TYPE_COLUMNS = ["type", "transaction type", "debit/credit", "credit/debit"]
 DEBIT_TYPES = ["debit", "withdrawal", "purchase", "charge", "payment", "pos", "check"]
 CREDIT_TYPES = ["credit", "deposit", "payroll", "refund", "interest", "income"]
+PDF_AMOUNT_PATTERN = r"\$?\(\d[\d,]*\.\d{2}\)|\(?-?\$?\d[\d,]*\.\d{2}\)?|\$?\d[\d,]*\.\d{2}-"
+PDF_MONTH_PATTERN = (
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+)
+PDF_DATE_PATTERN = re.compile(
+    rf"^(?P<date>"
+    rf"\d{{4}}-\d{{2}}-\d{{2}}|"
+    rf"\d{{1,2}}/\d{{1,2}}(?:/\d{{2,4}})?|"
+    rf"(?:{PDF_MONTH_PATTERN})\.?\s+\d{{1,2}}(?:,?\s+\d{{4}})?"
+    rf")\s*,?\s+(?P<body>.+)$",
+    flags=re.IGNORECASE,
+)
+PDF_DEBIT_LABELS = {
+    "charge",
+    "debit",
+    "dr",
+    "fee",
+    "payment",
+    "purchase",
+    "withdrawal",
+}
+PDF_CREDIT_LABELS = {
+    "credit",
+    "cr",
+    "deposit",
+    "income",
+    "interest",
+    "payroll",
+    "refund",
+    "reversal",
+}
+PDF_NOISE_PATTERNS = [
+    r"\baccount\s+statement\b",
+    r"\bdate\s+description\s+amount\b",
+    r"\bopening\s+balance\b",
+    r"\bclosing\s+balance\b",
+    r"\bbeginning\s+balance\b",
+    r"\bending\s+balance\b",
+    r"\bstatement\s+period\b",
+    r"\bpage\s+\d+\b",
+    r"\btransactions?\b",
+    r"\btotal(?:s)?\b",
+]
 CSV_MAPPING_FIELDS = [
     "date_column",
     "description_column",
@@ -668,10 +722,11 @@ async def preview_transactions(
     """Preview parsed statement rows and duplicate estimates without importing."""
     account_label = validate_account_name(account_name)
     csv_mapping = resolve_csv_mapping_preset(csv_preset_id)
-    filename, file_type, rows, errors = await preview_uploaded_statement(file, csv_mapping=csv_mapping)
+    filename, file_type, rows, errors, diagnostics = await preview_uploaded_statement(file, csv_mapping=csv_mapping)
     apply_account_label(rows, account_label)
     preview = preview_import(rows, sample_limit=bounded_limit(limit, maximum=5000))
     preview["errors"] = errors
+    preview["diagnostics"] = diagnostics
     return {
         "filename": filename,
         "file_type": file_type,
@@ -1540,7 +1595,7 @@ async def parse_uploaded_statement(
 async def preview_uploaded_statement(
     file: UploadFile,
     csv_mapping: dict[str, str] | None = None,
-) -> tuple[str, str, list[dict], list[str]]:
+) -> tuple[str, str, list[dict], list[str], dict]:
     filename = Path(file.filename or "transactions.csv").name
     suffix = Path(filename).suffix.lower()
     content = await file.read()
@@ -1553,9 +1608,11 @@ async def preview_uploaded_statement(
             )
         except UnicodeDecodeError as exc:
             raise HTTPException(status_code=400, detail="CSV file must be UTF-8 text.") from exc
-        return filename, "csv", rows, errors
+        diagnostics = csv_import_diagnostics(content, rows, errors)
+        return filename, "csv", rows, errors, diagnostics
     if suffix == ".pdf":
-        return filename, "pdf", parse_transactions_pdf(content, filename), []
+        rows, diagnostics = parse_transactions_pdf_preview(content, filename)
+        return filename, "pdf", rows, [], diagnostics
     raise HTTPException(status_code=400, detail="Only CSV or text-based PDF uploads are supported.")
 
 
@@ -1657,6 +1714,26 @@ def parse_transactions_csv_rows(
     return rows, errors
 
 
+def csv_import_diagnostics(content: str, rows: list[dict], errors: list[str]) -> dict:
+    """Return lightweight diagnostics for a CSV preview."""
+    data_lines = [
+        line
+        for line in content.splitlines()[1:]
+        if line.strip()
+    ]
+    notes = []
+    if errors:
+        notes.append("Rows with errors were skipped for preview; direct upload remains strict.")
+    return {
+        "parser": "csv",
+        "total_lines": len(data_lines),
+        "parsed_rows": len(rows),
+        "skipped_lines": len(errors),
+        "skipped_examples": errors[:5],
+        "notes": notes,
+    }
+
+
 def row_is_blank(raw_row: dict) -> bool:
     return not any(str(value).strip() for value in raw_row.values() if value is not None)
 
@@ -1685,81 +1762,249 @@ def validate_csv_mapping_headers(fieldnames: list[str], column_mapping: dict[str
     return None
 
 
-def parse_transactions_pdf(content: bytes, source_file: str) -> list[dict]:
-    """Parse transaction rows from a text-based PDF statement."""
+def read_pdf_text(content: bytes) -> str:
     try:
         reader = PdfReader(BytesIO(content))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
     except Exception as exc:
         raise HTTPException(
             status_code=400,
             detail="Could not read PDF text. Scanned image PDFs are not supported yet.",
         ) from exc
 
+
+def parse_transactions_pdf(content: bytes, source_file: str) -> list[dict]:
+    """Parse transaction rows from a text-based PDF statement."""
+    text = read_pdf_text(content)
     return parse_transactions_text(text, source_file)
+
+
+def parse_transactions_pdf_preview(content: bytes, source_file: str) -> tuple[list[dict], dict]:
+    """Parse a PDF for preview and return statement-text diagnostics."""
+    text = read_pdf_text(content)
+    return parse_transactions_text_preview(text, source_file)
 
 
 def parse_transactions_text(content: str, source_file: str) -> list[dict]:
     """Parse transaction-like rows from extracted statement text."""
+    rows, _diagnostics = parse_transactions_text_rows(
+        content,
+        source_file,
+        collect_diagnostics=False,
+    )
+    return rows
+
+
+def parse_transactions_text_preview(content: str, source_file: str) -> tuple[list[dict], dict]:
+    """Parse transaction-like rows from statement text with diagnostics."""
+    return parse_transactions_text_rows(
+        content,
+        source_file,
+        collect_diagnostics=True,
+    )
+
+
+def parse_transactions_text_rows(
+    content: str,
+    source_file: str,
+    collect_diagnostics: bool = False,
+) -> tuple[list[dict], dict]:
+    """Parse extracted statement text into rows and optional diagnostics."""
     has_balance_column = bool(re.search(r"\bbalance\b", content, flags=re.IGNORECASE))
+    default_year = infer_statement_year(source_file, content)
+    diagnostics = {
+        "parser": "pdf_text",
+        "total_lines": 0,
+        "parsed_rows": 0,
+        "skipped_lines": 0,
+        "skipped_examples": [],
+        "notes": [],
+    }
+    if has_balance_column:
+        diagnostics["notes"].append("Detected a balance column; using the first of the final two amounts as the transaction amount.")
+    if default_year:
+        diagnostics["notes"].append(f"Rows without a year use {default_year} inferred from the statement.")
+
     rows = []
     for line_number, line in enumerate(content.splitlines(), start=1):
         normalized = re.sub(r"\s+", " ", line).strip()
         if not normalized:
             continue
+        diagnostics["total_lines"] += 1
 
         try:
-            row = parse_statement_text_line(normalized, has_balance_column)
+            row = parse_statement_text_line(
+                normalized,
+                has_balance_column=has_balance_column,
+                default_year=default_year,
+            )
         except ValueError as exc:
+            if collect_diagnostics:
+                record_pdf_skipped_line(diagnostics, line_number, normalized, str(exc))
+                continue
             raise HTTPException(status_code=400, detail=f"PDF line {line_number}: {exc}") from exc
         if row:
             row["source_file"] = source_file
             rows.append(row)
+        elif collect_diagnostics and should_report_unparsed_pdf_line(normalized):
+            record_pdf_skipped_line(diagnostics, line_number, normalized, "not a recognizable transaction row")
 
     if not rows:
+        message = (
+            "PDF did not contain recognizable transaction rows. Expected rows like "
+            "'2026-07-02 Trader Joes -86.42'."
+        )
+        if collect_diagnostics:
+            diagnostics["notes"].append(message)
+            return [], diagnostics
         raise HTTPException(
             status_code=400,
-            detail=(
-                "PDF did not contain recognizable transaction rows. Expected rows like "
-                "'2026-07-02 Trader Joes -86.42'."
-            ),
+            detail=message,
         )
 
-    return rows
+    diagnostics["parsed_rows"] = len(rows)
+    return rows, diagnostics
 
 
-def parse_statement_text_line(line: str, has_balance_column: bool = False) -> dict | None:
+def parse_statement_text_line(
+    line: str,
+    has_balance_column: bool = False,
+    default_year: int | None = None,
+) -> dict | None:
     """Parse one extracted PDF text line into a normalized transaction row."""
-    row_match = re.match(
-        r"^(?P<date>\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})\s+(?P<body>.+)$",
-        line,
-    )
+    row_match = PDF_DATE_PATTERN.match(line)
     if not row_match:
         return None
 
     body = row_match.group("body").strip()
-    amount_match = re.search(
-        r"(?P<first>\(?-?\$?\d[\d,]*\.\d{2}\)?|\$?\(\d[\d,]*\.\d{2}\))"
-        r"(?:\s+(?P<second>\(?-?\$?\d[\d,]*\.\d{2}\)?|\$?\(\d[\d,]*\.\d{2}\)))?$",
-        body,
-    )
-    if not amount_match:
+    amount_matches = list(re.finditer(PDF_AMOUNT_PATTERN, body))
+    if not amount_matches:
         return None
 
-    amount_group = "first" if has_balance_column and amount_match.group("second") else "second"
-    amount_text = amount_match.group(amount_group) or amount_match.group("first")
-    description_end = amount_match.start(amount_group) if amount_match.group(amount_group) else amount_match.start("first")
-    description = clean_merchant_description(body[:description_end].strip())
+    amount_match = select_statement_amount(amount_matches, has_balance_column)
+    amount_text = amount_match.group(0)
+    description_text = body[:amount_match.start()].strip(" ,")
+    trailing_text = body[amount_match.end():].strip(" ,")
+    direction_label = detect_pdf_direction_label(description_text, trailing_text)
+    description = clean_merchant_description(strip_pdf_amount_labels(description_text))
     if not description:
         raise ValueError("missing transaction description")
 
-    amount_cents = money_to_cents(amount_text)
+    amount_cents = pdf_amount_to_cents(amount_text, description, direction_label)
     return {
-        "date": parse_date(row_match.group("date")),
+        "date": parse_statement_date(row_match.group("date"), default_year),
         "description": description,
         "amount_cents": amount_cents,
         "category": categorize_transaction(description, amount_cents),
     }
+
+
+def select_statement_amount(amount_matches: list[re.Match], has_balance_column: bool) -> re.Match:
+    """Choose the transaction amount when statement rows also include balances."""
+    if has_balance_column and len(amount_matches) >= 2:
+        return amount_matches[-2]
+    return amount_matches[-1]
+
+
+def detect_pdf_direction_label(description_text: str, trailing_text: str) -> str | None:
+    """Find debit/credit hints printed beside a PDF amount."""
+    description_tokens = re.findall(r"[a-z]+", description_text.lower())
+    trailing_tokens = re.findall(r"[a-z]+", trailing_text.lower())
+    candidates = []
+    if description_tokens:
+        candidates.append(description_tokens[-1])
+    if trailing_tokens:
+        candidates.append(trailing_tokens[0])
+    for token in candidates:
+        if token in PDF_DEBIT_LABELS or token in PDF_CREDIT_LABELS:
+            return token
+    return None
+
+
+def strip_pdf_amount_labels(description_text: str) -> str:
+    """Remove column labels that can appear between PDF merchant text and amount."""
+    cleaned = description_text.strip(" ,")
+    return re.sub(
+        r"\s*,?\s+\b(?:debit|withdrawal|charge|purchase|amount|dr|cr)\b$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip(" ,")
+
+
+def pdf_amount_to_cents(amount_text: str, description: str, direction_label: str | None = None) -> int:
+    """Normalize PDF amounts, defaulting unsigned debits to expenses."""
+    amount_cents = money_to_cents(amount_text)
+    if amount_cents < 0:
+        return amount_cents
+
+    if direction_label in PDF_DEBIT_LABELS:
+        return -abs(amount_cents)
+    if direction_label in PDF_CREDIT_LABELS:
+        return abs(amount_cents)
+
+    normalized_description = description.lower()
+    if has_any(normalized_description, CREDIT_TYPES):
+        return abs(amount_cents)
+    return -abs(amount_cents)
+
+
+def parse_statement_date(value: str, default_year: int | None = None) -> str:
+    """Parse PDF statement date formats, using a statement year when omitted."""
+    normalized = re.sub(r"\s+", " ", value.replace(".", "")).strip().rstrip(",")
+    try:
+        return parse_date(normalized)
+    except ValueError:
+        pass
+
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(normalized.replace(",", ""), fmt).date().isoformat()
+        except ValueError:
+            continue
+
+    if re.fullmatch(r"\d{1,2}/\d{1,2}", normalized):
+        if default_year is None:
+            raise ValueError(f"missing statement year for date '{value}'")
+        return datetime.strptime(f"{normalized}/{default_year}", "%m/%d/%Y").date().isoformat()
+
+    for fmt in ("%B %d", "%b %d"):
+        if default_year is None:
+            raise ValueError(f"missing statement year for date '{value}'")
+        try:
+            return datetime.strptime(f"{normalized} {default_year}", f"{fmt} %Y").date().isoformat()
+        except ValueError:
+            continue
+
+    raise ValueError(f"invalid date '{value}'")
+
+
+def infer_statement_year(*values: str) -> int | None:
+    """Infer a statement year from the filename or extracted text."""
+    years: dict[int, int] = {}
+    for value in values:
+        for match in re.findall(r"\b(20\d{2})\b", value):
+            year = int(match)
+            years[year] = years.get(year, 0) + 1
+    if not years:
+        return None
+    return sorted(years.items(), key=lambda item: (item[1], item[0]), reverse=True)[0][0]
+
+
+def should_report_unparsed_pdf_line(line: str) -> bool:
+    """Return whether an ignored PDF line is useful enough to show as diagnostics."""
+    lowered = line.lower()
+    if any(re.search(pattern, lowered) for pattern in PDF_NOISE_PATTERNS):
+        return False
+    return bool(PDF_DATE_PATTERN.match(line) or re.search(PDF_AMOUNT_PATTERN, line))
+
+
+def record_pdf_skipped_line(diagnostics: dict, line_number: int, line: str, reason: str) -> None:
+    diagnostics["skipped_lines"] += 1
+    if len(diagnostics["skipped_examples"]) >= 5:
+        return
+    snippet = line if len(line) <= 100 else f"{line[:97]}..."
+    diagnostics["skipped_examples"].append(f"Line {line_number}: {reason}: {snippet}")
 
 
 def get_column(

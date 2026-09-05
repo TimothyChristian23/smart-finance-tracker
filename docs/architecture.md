@@ -6,8 +6,8 @@ AI-ready product surface.
 ## MVP Flow
 
 1. A user uploads or previews a CSV bank statement or text-based PDF statement, or manually adds a cash or one-off transaction.
-2. The backend parses common CSV columns, common bank-specific CSV aliases, debit/credit split columns, saved CSV mapping presets, and transaction-like rows from PDF text, then cleans noisy bank descriptors into stable merchant names.
-3. Preview requests return normalized rows, category assignments, confidence, source, explanation, totals, date ranges, duplicate estimates, and row-level CSV errors without saving data.
+2. The backend parses common CSV columns, common bank-specific CSV aliases, debit/credit split columns, saved CSV mapping presets, and flexible transaction-like rows from PDF text, then cleans noisy bank descriptors into stable merchant names.
+3. Preview requests return normalized rows, category assignments, confidence, source, explanation, totals, date ranges, duplicate estimates, parser diagnostics, skipped-line examples, and row-level CSV errors without saving data.
 4. Direct import requests normalize transactions into SQLite with cent-based amounts and optional account labels; reviewed import requests save the user's edited preview categories. Each successful upload is logged with imported and duplicate counts.
 5. An explainable local classifier assigns starter categories from high-confidence merchant descriptions, scores lower-confidence signals for review, and lets saved normalized merchant rules override future imports.
 6. Optional OpenAI-backed AI Assist can re-score the current import preview or category review queue when `OPENAI_API_KEY` is configured. It sends only candidates after an explicit dashboard confirmation, updates only unsaved preview rows, and never imports data or changes existing transactions automatically.
@@ -42,8 +42,8 @@ dismissals, recurring ignores, anomaly dismissals, CSV mapping presets, and Q&A 
 
 The UI smoke workflow starts FastAPI and Vite against an isolated SQLite database,
 then drives the browser through CSV mapping preset creation, import
-preview/import, transaction splitting, manual transaction add/edit/delete,
-backup download, reset/restore, and account-aware Q&A.
+preview diagnostics/import, transaction splitting, manual transaction
+add/edit/delete, backup download, reset/restore, and account-aware Q&A.
 
 ## Future AI Layer
 

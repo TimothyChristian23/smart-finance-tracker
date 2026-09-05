@@ -121,6 +121,14 @@ def test_preview_transactions_does_not_import_and_marks_duplicates():
     assert payload["total_income"] == 3200.0
     assert payload["rows"][0]["description"] == "Payroll Deposit"
     assert payload["rows"][0]["duplicate"] is False
+    assert payload["diagnostics"] == {
+        "parser": "csv",
+        "total_lines": 11,
+        "parsed_rows": 11,
+        "skipped_lines": 0,
+        "skipped_examples": [],
+        "notes": [],
+    }
 
     empty_summary = client.get("/summary?month=2026-07").json()
     assert empty_summary["transaction_count"] == 0
@@ -364,6 +372,11 @@ bad-date,Trader Joes,-86.42
     assert [row["description"] for row in payload["rows"]] == ["Payroll Deposit", "Apartment Rent"]
     assert payload["errors"][0] == "Row 3: invalid date 'bad-date'"
     assert payload["errors"][1].startswith("Row 5: missing required column")
+    assert payload["diagnostics"]["parser"] == "csv"
+    assert payload["diagnostics"]["parsed_rows"] == 2
+    assert payload["diagnostics"]["skipped_lines"] == 2
+    assert payload["diagnostics"]["skipped_examples"] == payload["errors"]
+    assert "direct upload remains strict" in payload["diagnostics"]["notes"][0]
 
     empty_summary = client.get("/summary?month=2026-07").json()
     assert empty_summary["transaction_count"] == 0
@@ -1476,6 +1489,55 @@ def test_pdf_upload_imports_text_statement_rows():
     assert summary["total_spending"] == 1543.17
     assert summary["transaction_count"] == 4
     assert summary["categories"][0] == {"category": "Housing", "total": 1450.0}
+
+
+def test_pdf_preview_supports_common_bank_statement_rows_and_diagnostics():
+    pdf_bytes = make_pdf_bytes([
+        "July 2026 Statement",
+        "Statement Period July 1, 2026 - July 31, 2026",
+        "Date Description Amount Balance",
+        "07/15 AMAZON MKTPLACE $42.10",
+        "Jul 16 Starbucks -8.75",
+        "2026-07-17, Trader Joes, Debit 54.23",
+        "2026-07-18 Payroll Deposit 3200.00 5100.00",
+        "07/31 Pending Authorization 1234",
+        "Rewards summary 12.00 points",
+    ])
+
+    response = client.post(
+        "/transactions/preview?limit=10",
+        files={"file": ("july-2026-statement.pdf", pdf_bytes, "application/pdf")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["file_type"] == "pdf"
+    assert payload["row_count"] == 4
+    assert payload["total_income"] == 3200.0
+    assert payload["total_spending"] == 105.08
+    assert payload["errors"] == []
+
+    by_description = {
+        row["description"]: row
+        for row in payload["rows"]
+    }
+    assert by_description["Amazon Marketplace"]["date"] == "2026-07-15"
+    assert by_description["Amazon Marketplace"]["amount"] == -42.1
+    assert by_description["Amazon Marketplace"]["category"] == "Shopping"
+    assert by_description["Starbucks"]["date"] == "2026-07-16"
+    assert by_description["Starbucks"]["amount"] == -8.75
+    assert by_description["Trader Joes"]["amount"] == -54.23
+    assert by_description["Payroll Deposit"]["amount"] == 3200.0
+    assert by_description["Payroll Deposit"]["category"] == "Income"
+
+    diagnostics = payload["diagnostics"]
+    assert diagnostics["parser"] == "pdf_text"
+    assert diagnostics["parsed_rows"] == 4
+    assert diagnostics["skipped_lines"] == 2
+    assert any("Rows without a year use 2026" in note for note in diagnostics["notes"])
+    assert any("Detected a balance column" in note for note in diagnostics["notes"])
+    assert any("Pending Authorization" in example for example in diagnostics["skipped_examples"])
+    assert any("Rewards summary" in example for example in diagnostics["skipped_examples"])
 
 
 def test_ask_food_question_uses_exact_transaction_totals():

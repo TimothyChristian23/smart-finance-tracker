@@ -63,6 +63,10 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   );
   await expect(importPanel.getByText(`${sampleTransactionCount} importable`)).toBeVisible();
   const previewPanel = importPanel.locator(".import-preview");
+  await expect(previewPanel.getByLabel("Import diagnostics")).toContainText("CSV parser");
+  await expect(previewPanel.getByLabel("Import diagnostics")).toContainText(
+    `${sampleTransactionCount} scanned | ${sampleTransactionCount} parsed | 0 skipped`,
+  );
   await expect(previewPanel.getByText("AI Assist sends transaction descriptions")).toBeVisible();
   await expect(previewPanel.getByRole("button", { name: "AI Assist" })).toBeDisabled();
   await importPanel.getByLabel("Category for Trader Joes").first().selectOption("Dining");

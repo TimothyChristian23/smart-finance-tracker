@@ -571,6 +571,40 @@ h2 {
   text-align: center;
 }
 
+.preview-diagnostics {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.preview-diagnostics strong,
+.preview-diagnostics span,
+.preview-diagnostics small {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.preview-diagnostics strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.preview-diagnostics span,
+.preview-diagnostics small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.preview-diagnostics svg {
+  flex-shrink: 0;
+}
+
 .preview-errors {
   display: grid;
   gap: 6px;

@@ -1781,6 +1781,13 @@ function AccountSummaryList({ accounts }) {
 
 function ImportPreview({ aiStatus, busy, categoryOptions, onAskAI, onCategoryChange, preview }) {
   const errors = preview.errors || [];
+  const diagnostics = preview.diagnostics;
+  const diagnosticDetails = diagnostics
+    ? [
+        ...(diagnostics.notes || []),
+        ...(diagnostics.skipped_examples || []),
+      ]
+    : [];
 
   return (
     <div className="import-preview">
@@ -1789,6 +1796,20 @@ function ImportPreview({ aiStatus, busy, categoryOptions, onAskAI, onCategoryCha
         <span>{preview.duplicate_count} duplicates</span>
         <span>{money(preview.total_spending)} spending</span>
       </div>
+      {diagnostics && (
+        <div className="preview-diagnostics" aria-label="Import diagnostics">
+          <strong>
+            <ClipboardList size={14} />
+            {importParserLabel(diagnostics.parser)}
+          </strong>
+          <span>
+            {diagnostics.total_lines} scanned | {diagnostics.parsed_rows} parsed | {diagnostics.skipped_lines} skipped
+          </span>
+          {diagnosticDetails.slice(0, 5).map((detail, index) => (
+            <small key={`${detail}-${index}`}>{detail}</small>
+          ))}
+        </div>
+      )}
       <div className="ai-review-callout preview-ai-callout">
         <div>
           <strong>AI Assist</strong>
@@ -2732,6 +2753,12 @@ function money(value) {
     style: "currency",
     currency: "USD",
   }).format(Number(value) || 0);
+}
+
+function importParserLabel(parser) {
+  if (parser === "pdf_text") return "PDF text parser";
+  if (parser === "csv") return "CSV parser";
+  return "Statement parser";
 }
 
 function categoryPreviewLabel(row) {
