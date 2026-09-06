@@ -88,7 +88,47 @@ def connect() -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """Create database tables if they do not exist."""
+    """Create and migrate database tables if they do not exist."""
+    ensure_schema_migration_table(conn)
+    apply_schema_migrations(conn)
+    conn.execute(f"PRAGMA user_version = {len(SCHEMA_MIGRATIONS)}")
+    conn.commit()
+
+
+def ensure_schema_migration_table(conn: sqlite3.Connection) -> None:
+    """Create the schema migration ledger if it does not exist."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def apply_schema_migrations(conn: sqlite3.Connection) -> None:
+    """Run unapplied schema migrations in order."""
+    applied_versions = {
+        row["version"]
+        for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+    }
+    for migration in SCHEMA_MIGRATIONS:
+        if migration["version"] in applied_versions:
+            continue
+        migration["apply"](conn)
+        conn.execute(
+            """
+            INSERT INTO schema_migrations (version, name)
+            VALUES (?, ?)
+            """,
+            (migration["version"], migration["name"]),
+        )
+
+
+def apply_current_schema_migration(conn: sqlite3.Connection) -> None:
+    """Create or align the current local SQLite schema."""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS transactions (
@@ -273,7 +313,6 @@ def init_db(conn: sqlite3.Connection) -> None:
         ON transactions (account_name)
         """
     )
-    conn.commit()
 
 
 def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
@@ -283,6 +322,15 @@ def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, 
     }
     if column_name not in columns:
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+
+
+SCHEMA_MIGRATIONS = (
+    {
+        "version": "0001",
+        "name": "current_local_finance_schema",
+        "apply": apply_current_schema_migration,
+    },
+)
 
 
 def reset_db() -> None:

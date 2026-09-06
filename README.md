@@ -19,6 +19,7 @@ The first implementation slice focuses on trustworthy analytics:
 - Upload history with imported and duplicate counts
 - Import quality report for duplicate skips, category review needs, anomalies, and recurring detections
 - SQLite transaction storage
+- Versioned SQLite schema migrations for safe local database upgrades
 - Explainable starter categorization with confidence, source, and matched merchant signals
 - Optional OpenAI-powered AI Assist for import preview and review-only category suggestions
 - Editable transaction categories
@@ -106,6 +107,17 @@ Optional AI Assist:
 copy .env.example .env
 # Add your key to OPENAI_API_KEY before using AI Assist.
 ```
+
+## Database Migrations
+
+SQLite uses `FINANCE_DB_PATH`, defaulting to `./data/finance.sqlite3`. Every
+backend connection creates a `schema_migrations` ledger, applies unapplied
+migrations from `backend/app/database.py`, and updates SQLite `PRAGMA
+user_version`.
+
+The current baseline is `0001 current_local_finance_schema`. Future schema
+changes should add a new migration entry instead of editing an old migration, so
+existing local databases can upgrade safely.
 
 ## Frontend Quick Start
 

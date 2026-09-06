@@ -1,12 +1,13 @@
 """API tests for the Smart Personal Finance Tracker backend."""
 import json
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import ai_categorization
 from app.categorization import clean_merchant_description, merchant_key
-from app.database import reset_db
+from app.database import connect, reset_db
 from app.main import app, infer_month, money_to_cents, parse_transactions_csv
 
 client = TestClient(app)
@@ -79,6 +80,92 @@ def test_health():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_database_records_schema_migration_ledger():
+    with connect() as conn:
+        migrations = conn.execute(
+            "SELECT version, name FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        user_version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+    assert [(row["version"], row["name"]) for row in migrations] == [
+        ("0001", "current_local_finance_schema"),
+    ]
+    assert user_version == 1
+
+
+def test_database_migration_preserves_legacy_rows_and_adds_account_columns(monkeypatch, tmp_path):
+    db_path = tmp_path / "legacy.sqlite3"
+    raw_conn = sqlite3.connect(db_path)
+    raw_conn.execute(
+        """
+        CREATE TABLE transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_date TEXT NOT NULL,
+            description TEXT NOT NULL,
+            amount_cents INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            source_file TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    raw_conn.execute(
+        """
+        CREATE TABLE upload_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            parsed_count INTEGER NOT NULL,
+            imported_count INTEGER NOT NULL,
+            duplicates_skipped INTEGER NOT NULL,
+            first_transaction_date TEXT,
+            last_transaction_date TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    raw_conn.execute(
+        """
+        INSERT INTO transactions (
+            transaction_date,
+            description,
+            amount_cents,
+            category,
+            source_file
+        )
+        VALUES ('2026-07-02', 'Trader Joes', -8642, 'Food & Grocery', 'legacy.csv')
+        """
+    )
+    raw_conn.commit()
+    raw_conn.close()
+
+    monkeypatch.setenv("FINANCE_DB_PATH", str(db_path))
+
+    with connect() as conn:
+        transaction_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(transactions)").fetchall()
+        }
+        upload_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(upload_history)").fetchall()
+        }
+        transaction = conn.execute(
+            "SELECT description, amount_cents FROM transactions"
+        ).fetchone()
+        migrations = conn.execute(
+            "SELECT version, name FROM schema_migrations ORDER BY version"
+        ).fetchall()
+
+    assert "account_name" in transaction_columns
+    assert "account_name" in upload_columns
+    assert transaction["description"] == "Trader Joes"
+    assert transaction["amount_cents"] == -8642
+    assert [(row["version"], row["name"]) for row in migrations] == [
+        ("0001", "current_local_finance_schema"),
+    ]
 
 
 def test_upload_transactions_and_monthly_summary():
