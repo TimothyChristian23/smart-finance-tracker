@@ -143,7 +143,9 @@ http://localhost:5173
 
 ## Try The Sample Data
 
-Upload `data/sample_transactions.csv` through the frontend or API. Then ask:
+Click `Load Samples` in the Import Statement panel to seed the app with bundled
+synthetic checking and recurring-charge statements. You can also upload
+`data/sample_transactions.csv` through the frontend or API manually. Then ask:
 
 ```text
 How much did I spend on food last month?
@@ -161,6 +163,7 @@ GET  /forecast/monthly?month=2026-08
 GET  /months
 GET  /uploads
 GET  /imports/quality?month=2026-07
+POST /demo/sample-data
 GET  /ai/categorization/status
 POST /categories/review/ai?month=2026-07
 GET  /categories/review/ignored

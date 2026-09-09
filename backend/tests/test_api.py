@@ -101,6 +101,40 @@ def test_health():
     assert response.json() == {"status": "ok"}
 
 
+def test_demo_sample_data_imports_bundled_statements_and_skips_repeats():
+    response = client.post("/demo/sample-data")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["imported"] == 52
+    assert payload["duplicates_skipped"] == 0
+    assert payload["files"] == [
+        {
+            "filename": "sample_transactions.csv",
+            "account_name": "Demo Checking",
+            "parsed": 37,
+            "imported": 37,
+            "duplicates_skipped": 0,
+        },
+        {
+            "filename": "sample_recurring_transactions.csv",
+            "account_name": "Demo Recurring",
+            "parsed": 15,
+            "imported": 15,
+            "duplicates_skipped": 0,
+        },
+    ]
+    assert client.get("/summary").json()["transaction_count"] == 52
+    assert client.get("/accounts").json() == ["Demo Checking", "Demo Recurring"]
+    assert client.get("/recurring").json()[0]["merchant"] == "Gym Membership"
+
+    repeat = client.post("/demo/sample-data").json()
+
+    assert repeat["imported"] == 0
+    assert repeat["duplicates_skipped"] == 52
+    assert client.get("/summary").json()["transaction_count"] == 52
+
+
 def test_database_records_schema_migration_ledger():
     with connect() as conn:
         migrations = conn.execute(

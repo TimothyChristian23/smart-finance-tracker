@@ -27,6 +27,7 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(page.getByText("Online")).toBeVisible();
 
   const importPanel = page.getByTestId("import-panel");
+  await expect(importPanel.getByRole("button", { name: "Load Samples" })).toBeVisible();
   const customCsvPath = testInfo.outputPath("custom-bank.csv");
   fs.writeFileSync(
     customCsvPath,

@@ -108,6 +108,20 @@ class UploadResponse(BaseModel):
     duplicates_skipped: int = 0
 
 
+class DemoSampleFileResponse(BaseModel):
+    filename: str
+    account_name: str | None = None
+    parsed: int
+    imported: int
+    duplicates_skipped: int
+
+
+class DemoSampleDataResponse(BaseModel):
+    imported: int
+    duplicates_skipped: int
+    files: list[DemoSampleFileResponse]
+
+
 class ImportPreviewRow(BaseModel):
     date: str
     description: str
@@ -713,11 +727,22 @@ AI_CATEGORY_WARNING = (
     "to OpenAI for category suggestions. It can update unsaved preview categories, "
     "but it never imports data or changes existing transactions automatically."
 )
+DEMO_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DEMO_SAMPLE_STATEMENTS = [
+    {"filename": "sample_transactions.csv", "account_name": "Demo Checking"},
+    {"filename": "sample_recurring_transactions.csv", "account_name": "Demo Recurring"},
+]
 
 
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/demo/sample-data", response_model=DemoSampleDataResponse)
+async def load_demo_sample_data() -> dict:
+    """Load bundled synthetic sample statements for a quick local demo."""
+    return import_demo_sample_data()
 
 
 @app.post("/transactions/upload", response_model=UploadResponse)
@@ -1608,6 +1633,39 @@ async def clear_all_data(confirmation: str | None = None) -> dict:
 
     reset_all_data()
     return {"message": "All local finance data cleared."}
+
+
+def import_demo_sample_data() -> dict:
+    files = []
+    total_imported = 0
+    total_skipped = 0
+
+    for sample in DEMO_SAMPLE_STATEMENTS:
+        filename = sample["filename"]
+        path = DEMO_DATA_DIR / filename
+        if not path.exists():
+            raise HTTPException(status_code=500, detail=f"Demo sample file is missing: {filename}.")
+
+        rows = parse_transactions_csv(path.read_text(encoding="utf-8-sig"), filename)
+        account_name = validate_account_name(sample["account_name"])
+        apply_account_label(rows, account_name)
+        result = insert_transactions(rows)
+        upload = record_upload(filename, "csv", rows, result, account_name=account_name)
+        total_imported += result["inserted"]
+        total_skipped += result["skipped"]
+        files.append({
+            "filename": upload["filename"],
+            "account_name": upload["account_name"],
+            "parsed": upload["parsed_count"],
+            "imported": upload["imported_count"],
+            "duplicates_skipped": upload["duplicates_skipped"],
+        })
+
+    return {
+        "imported": total_imported,
+        "duplicates_skipped": total_skipped,
+        "files": files,
+    }
 
 
 async def parse_uploaded_statement(

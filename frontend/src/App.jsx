@@ -265,6 +265,26 @@ export default function App() {
     }
   }
 
+  async function handleLoadDemoData() {
+    setBusy(true);
+    setUploadStatus("Loading sample data...");
+
+    try {
+      const payload = await request("/demo/sample-data", { method: "POST" });
+      const skipped = payload.duplicates_skipped || 0;
+      const duplicateText = skipped ? ` and skipped ${skipped} duplicates` : "";
+      setUploadStatus(payload.imported
+        ? `Loaded ${payload.imported} sample transactions${duplicateText} from ${payload.files.length} statements.`
+        : `Sample data is already loaded; skipped ${skipped} duplicates.`);
+      clearPreviewState();
+      await refreshDashboard();
+    } catch (error) {
+      setUploadStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handlePreviewUpload(event) {
     const file = event.currentTarget.form.elements.statement.files[0];
     if (!file) {
@@ -1165,6 +1185,10 @@ export default function App() {
               <button className="ghost-button" type="button" disabled={busy} onClick={handleExportBackup}>
                 <Download size={16} />
                 Backup
+              </button>
+              <button className="ghost-button" type="button" disabled={busy} onClick={handleLoadDemoData}>
+                <Sparkles size={16} />
+                Load Samples
               </button>
               <button className="ghost-button danger-button" type="button" disabled={busy || !transactions.length} onClick={handleClear}>
                 <Trash2 size={16} />
