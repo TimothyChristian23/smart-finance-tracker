@@ -235,10 +235,10 @@ uncategorized expenses, amount/category mismatches, partial account labels, zero
 amounts, and very large expenses.
 CSV imports accept common bank-style headers such as `Date`, `Posting Date`,
 `Transaction Date`, `Description`, `Transaction Description`, `Payee`, `Memo`,
-`Amount`, `Transaction Amount`, `Debit Amount`, and `Credit Amount`. Debit values
-are stored as expenses even when the export already includes a minus sign or
-parentheses, and unsigned amount columns can use a `Type` column for debit/credit
-direction.
+`Amount`, `Transaction Amount`, `Debit Amount`, `Credit Amount`, `Debit/Credit`,
+`Card Member`, and `Account #`. Debit values are stored as expenses even when the
+export already includes a minus sign or parentheses, and unsigned amount columns
+can use a `Type`, `Details`, or debit/credit column for direction.
 For banks with unusual headers, save a CSV mapping preset from the dashboard or
 `PUT /csv-mapping-presets`, then choose it during preview or direct import. A
 preset can map date, description, signed amount or debit/credit columns, optional
@@ -251,6 +251,10 @@ Use the dashboard account label field or CSV headers like `Account` and
 CSV export requests can filter by account with `account=Chase%20Checking`.
 The Account Summary panel and `GET /accounts/summary` endpoint break spending,
 income, net cash flow, and transaction counts down by account.
+Backend parser tests include reusable fixtures in
+`backend/tests/fixtures/statements` for Chase-style checking CSV, Amex-style card
+CSV, Capital One-style card CSV, a generic debit/credit bank CSV, mixed bad rows,
+and PDF-extracted statement text.
 Manual transactions can be added from the Transactions panel and are stored with
 `manual` as their source.
 Expense transactions can be split into multiple category allocations from the

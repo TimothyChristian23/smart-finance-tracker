@@ -1,0 +1,7 @@
+Date,Description,Amount,Category,Account
+2026-07-01,Payroll Deposit,3200.00,Dining,Checking
+bad-date,Trader Joes,-86.42,Food & Grocery,Checking
+2026-07-03,Mystery Vendor,-12.34,,Checking
+2026-07-04,Cash Adjustment,0.00,Other,Checking
+2026-07-05,Huge Transfer,-2500.00,Other,
+2026-07-06,Missing Amount,,Other,Checking

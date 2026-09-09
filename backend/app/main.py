@@ -597,7 +597,17 @@ DESCRIPTION_COLUMNS = [
     "narrative",
 ]
 CATEGORY_COLUMNS = ["category", "type category", "spending category"]
-ACCOUNT_COLUMNS = ["account", "account name", "account nickname", "source account", "card", "card name"]
+ACCOUNT_COLUMNS = [
+    "account",
+    "account name",
+    "account nickname",
+    "source account",
+    "card",
+    "card name",
+    "card member",
+    "account #",
+    "account number",
+]
 AMOUNT_COLUMNS = [
     "amount",
     "transaction amount",
@@ -622,8 +632,8 @@ CREDIT_COLUMNS = [
     "deposits",
     "deposit amount",
 ]
-TYPE_COLUMNS = ["type", "transaction type", "debit/credit", "credit/debit"]
-DEBIT_TYPES = ["debit", "withdrawal", "purchase", "charge", "payment", "pos", "check"]
+TYPE_COLUMNS = ["type", "transaction type", "debit/credit", "credit/debit", "details"]
+DEBIT_TYPES = ["debit", "withdrawal", "purchase", "charge", "payment", "pos", "check", "sale", "posted"]
 CREDIT_TYPES = ["credit", "deposit", "payroll", "refund", "interest", "income"]
 PDF_AMOUNT_PATTERN = r"\$?\(\d[\d,]*\.\d{2}\)|\(?-?\$?\d[\d,]*\.\d{2}\)?|\$?\d[\d,]*\.\d{2}-"
 PDF_MONTH_PATTERN = (
@@ -1704,7 +1714,7 @@ def parse_transactions_csv_rows(
             "date": parsed_date,
             "description": description,
             "amount_cents": amount_cents,
-            "category": category or categorize_transaction(description, amount_cents),
+            "category": import_category_or_default(category, description, amount_cents),
             "source_file": source_file,
             "account_name": account_name,
         })
@@ -1716,6 +1726,15 @@ def parse_transactions_csv_rows(
         raise HTTPException(status_code=400, detail=message)
 
     return rows, errors
+
+
+def import_category_or_default(category: str, description: str, amount_cents: int) -> str:
+    """Use recognized imported categories, otherwise fall back to local categorization."""
+    normalized = " ".join((category or "").split()).lower()
+    for option in CATEGORY_OPTIONS:
+        if option.lower() == normalized:
+            return option
+    return categorize_transaction(description, amount_cents)
 
 
 def csv_import_diagnostics(content: str, rows: list[dict], errors: list[str]) -> dict:

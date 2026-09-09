@@ -1,6 +1,7 @@
 """API tests for the Smart Personal Finance Tracker backend."""
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from app.database import connect, reset_db
 from app.main import app, infer_month, money_to_cents, parse_transactions_csv
 
 client = TestClient(app)
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "statements"
 
 SAMPLE_CSV = """date,description,amount
 2026-07-01,Payroll Deposit,3200.00
@@ -73,6 +75,10 @@ def save_custom_csv_preset() -> dict:
     )
     assert response.status_code == 200
     return response.json()
+
+
+def statement_fixture(name: str) -> str:
+    return (FIXTURE_DIR / name).read_text(encoding="utf-8")
 
 
 def test_health():
@@ -298,6 +304,103 @@ def test_parse_transactions_csv_cleans_noisy_merchant_descriptions():
     assert merchant_key("POS DEBIT TRADER JOE'S #1234 SAN FRANCISCO CA") == "trader joes"
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        (
+            "chase_checking.csv",
+            {
+                "row_count": 4,
+                "total_income": 3200.0,
+                "total_spending": 1543.17,
+                "flagged_count": 0,
+                "rows": [
+                    ("Payroll Deposit", 3200.0, "Income", None, []),
+                    ("Trader Joes", -86.42, "Food & Grocery", None, []),
+                    ("Online Payment Apartment Rent", -1450.0, "Housing", None, []),
+                    ("Blue Bottle Coffee", -6.75, "Dining", None, []),
+                ],
+            },
+        ),
+        (
+            "amex_card.csv",
+            {
+                "row_count": 3,
+                "total_income": 12.0,
+                "total_spending": 71.95,
+                "flagged_count": 0,
+                "rows": [
+                    ("Blue Bottle Coffee", -6.75, "Dining", "Tim Card", []),
+                    ("Amazon Marketplace", -65.2, "Shopping", "Tim Card", []),
+                    ("Statement Credit", 12.0, "Income", "Tim Card", []),
+                ],
+            },
+        ),
+        (
+            "capital_one_card.csv",
+            {
+                "row_count": 3,
+                "total_income": 16.18,
+                "total_spending": 81.63,
+                "flagged_count": 1,
+                "rows": [
+                    ("Target", -54.23, "Shopping", None, []),
+                    ("Uber Trip Help.uber.com", -27.4, "Transport", None, []),
+                    ("Amazon Marketplace", 16.18, "Shopping", None, ["Income category mismatch"]),
+                ],
+            },
+        ),
+        (
+            "generic_debit_credit_bank.csv",
+            {
+                "row_count": 4,
+                "total_income": 3201.42,
+                "total_spending": 155.18,
+                "flagged_count": 0,
+                "rows": [
+                    ("Payroll Deposit", 3200.0, "Income", "Main Checking", []),
+                    ("Safeway", -73.18, "Food & Grocery", "Main Checking", []),
+                    ("Comcast", -82.0, "Utilities", "Main Checking", []),
+                    ("Interest Payment", 1.42, "Income", "Main Checking", []),
+                ],
+            },
+        ),
+    ],
+)
+def test_bank_statement_csv_fixtures_preview_realistic_formats(filename, expected):
+    response = client.post(
+        "/transactions/preview?limit=20",
+        files={"file": (filename, statement_fixture(filename), "text/csv")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filename"] == filename
+    assert payload["file_type"] == "csv"
+    assert payload["row_count"] == expected["row_count"]
+    assert payload["importable_count"] == expected["row_count"]
+    assert payload["duplicate_count"] == 0
+    assert payload["flagged_count"] == expected["flagged_count"]
+    assert payload["total_income"] == expected["total_income"]
+    assert payload["total_spending"] == expected["total_spending"]
+    assert payload["errors"] == []
+    assert payload["diagnostics"]["parser"] == "csv"
+    assert payload["diagnostics"]["parsed_rows"] == expected["row_count"]
+    assert payload["diagnostics"]["skipped_lines"] == 0
+
+    rows = [
+        (
+            row["description"],
+            row["amount"],
+            row["category"],
+            row["account_name"],
+            row["review_flags"],
+        )
+        for row in payload["rows"]
+    ]
+    assert rows == expected["rows"]
+
+
 def test_saved_merchant_rule_matches_noisy_descriptor_variants():
     client.post("/transactions/upload", files={"file": ("messy.csv", MESSY_MERCHANT_CSV, "text/csv")})
     transaction = next(
@@ -481,21 +584,20 @@ bad-date,Trader Joes,-86.42
 
 
 def test_preview_flags_suspicious_rows_before_import():
-    csv_content = """date,description,amount,category,account
-2026-07-01,Payroll Deposit,3200.00,Dining,Checking
-2026-07-02,Mystery Vendor,-12.34,,Checking
-2026-07-03,Cash Adjustment,0.00,Other,Checking
-2026-07-04,Huge Transfer,-2500.00,Other,
-"""
-
     response = client.post(
         "/transactions/preview",
-        files={"file": ("review-flags.csv", csv_content, "text/csv")},
+        files={"file": ("problem_rows.csv", statement_fixture("problem_rows.csv"), "text/csv")},
     )
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["row_count"] == 4
     assert payload["flagged_count"] == 4
+    assert payload["errors"][0] == "Row 3: invalid date 'bad-date'"
+    assert payload["errors"][1].startswith("Row 7: missing required column")
+    assert payload["diagnostics"]["total_lines"] == 6
+    assert payload["diagnostics"]["parsed_rows"] == 4
+    assert payload["diagnostics"]["skipped_lines"] == 2
 
     by_description = {
         row["description"]: row
@@ -509,6 +611,13 @@ def test_preview_flags_suspicious_rows_before_import():
         "Needs category review",
         "Large expense over $2,000.00",
     ]
+
+    upload_response = client.post(
+        "/transactions/upload",
+        files={"file": ("problem_rows.csv", statement_fixture("problem_rows.csv"), "text/csv")},
+    )
+    assert upload_response.status_code == 400
+    assert upload_response.json()["detail"] == "Row 3: invalid date 'bad-date'"
 
 
 def test_duplicate_upload_skips_existing_transactions():
@@ -1614,17 +1723,7 @@ def test_pdf_upload_imports_text_statement_rows():
 
 
 def test_pdf_preview_supports_common_bank_statement_rows_and_diagnostics():
-    pdf_bytes = make_pdf_bytes([
-        "July 2026 Statement",
-        "Statement Period July 1, 2026 - July 31, 2026",
-        "Date Description Amount Balance",
-        "07/15 AMAZON MKTPLACE $42.10",
-        "Jul 16 Starbucks -8.75",
-        "2026-07-17, Trader Joes, Debit 54.23",
-        "2026-07-18 Payroll Deposit 3200.00 5100.00",
-        "07/31 Pending Authorization 1234",
-        "Rewards summary 12.00 points",
-    ])
+    pdf_bytes = make_pdf_bytes(statement_fixture("text_pdf_statement_lines.txt").splitlines())
 
     response = client.post(
         "/transactions/preview?limit=10",

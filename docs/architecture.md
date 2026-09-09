@@ -45,6 +45,8 @@ The UI smoke workflow starts FastAPI and Vite against an isolated SQLite databas
 then drives the browser through CSV mapping preset creation, import
 preview diagnostics/import, transaction splitting, manual transaction
 add/edit/delete, backup download, reset/restore, and account-aware Q&A.
+Backend parser coverage also exercises reusable Chase-style, Amex-style,
+Capital One-style, generic debit/credit, problem-row, and PDF text fixtures.
 
 ## Future AI Layer
 
