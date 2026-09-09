@@ -208,6 +208,8 @@ def test_preview_transactions_does_not_import_and_marks_duplicates():
     assert payload["total_income"] == 3200.0
     assert payload["rows"][0]["description"] == "Payroll Deposit"
     assert payload["rows"][0]["duplicate"] is False
+    assert payload["flagged_count"] == 0
+    assert all(row["review_flags"] == [] for row in payload["rows"])
     assert payload["diagnostics"] == {
         "parser": "csv",
         "total_lines": 11,
@@ -227,7 +229,9 @@ def test_preview_transactions_does_not_import_and_marks_duplicates():
     ).json()
     assert duplicate_preview["importable_count"] == 0
     assert duplicate_preview["duplicate_count"] == 11
+    assert duplicate_preview["flagged_count"] == 11
     assert all(row["duplicate"] for row in duplicate_preview["rows"])
+    assert all("Duplicate of existing transaction" in row["review_flags"] for row in duplicate_preview["rows"])
 
 
 def test_preview_includes_category_explanations_and_saved_rules():
@@ -474,6 +478,37 @@ bad-date,Trader Joes,-86.42
     )
     assert upload_response.status_code == 400
     assert upload_response.json()["detail"] == "Row 3: invalid date 'bad-date'"
+
+
+def test_preview_flags_suspicious_rows_before_import():
+    csv_content = """date,description,amount,category,account
+2026-07-01,Payroll Deposit,3200.00,Dining,Checking
+2026-07-02,Mystery Vendor,-12.34,,Checking
+2026-07-03,Cash Adjustment,0.00,Other,Checking
+2026-07-04,Huge Transfer,-2500.00,Other,
+"""
+
+    response = client.post(
+        "/transactions/preview",
+        files={"file": ("review-flags.csv", csv_content, "text/csv")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["flagged_count"] == 4
+
+    by_description = {
+        row["description"]: row
+        for row in payload["rows"]
+    }
+    assert by_description["Payroll Deposit"]["review_flags"] == ["Income category mismatch"]
+    assert by_description["Mystery Vendor"]["review_flags"] == ["Needs category review"]
+    assert by_description["Cash Adjustment"]["review_flags"] == ["Zero amount"]
+    assert by_description["Huge Transfer"]["review_flags"] == [
+        "Missing account label",
+        "Needs category review",
+        "Large expense over $2,000.00",
+    ]
 
 
 def test_duplicate_upload_skips_existing_transactions():

@@ -556,7 +556,7 @@ h2 {
 
 .preview-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -678,6 +678,30 @@ h2 {
   font-size: 0.72rem;
   font-weight: 800;
   line-height: 1.35;
+}
+
+.preview-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.preview-flags span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  border: 1px solid rgba(164, 95, 32, 0.28);
+  background: #fff7ed;
+  color: var(--warn);
+  padding: 3px 6px;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.preview-flags svg {
+  flex-shrink: 0;
 }
 
 .preview-row-controls {

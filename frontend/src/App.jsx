@@ -1892,6 +1892,7 @@ function ImportPreview({ aiStatus, busy, categoryOptions, onAskAI, onCategoryCha
       <div className="preview-metrics">
         <span>{preview.importable_count} importable</span>
         <span>{preview.duplicate_count} duplicates</span>
+        <span>{preview.flagged_count || 0} review flags</span>
         <span>{money(preview.total_spending)} spending</span>
       </div>
       {diagnostics && (
@@ -1942,6 +1943,16 @@ function ImportPreview({ aiStatus, busy, categoryOptions, onAskAI, onCategoryCha
               <span>{row.date} | {row.account_name || "Unlabeled"} | {categoryPreviewLabel(row)}</span>
               {row.category_reason && (
                 <small>{row.category_source_label || "Category signal"}: {row.category_reason}</small>
+              )}
+              {!!row.review_flags?.length && (
+                <div className="preview-flags" aria-label={`Review flags for ${row.description}`}>
+                  {row.review_flags.map((flag) => (
+                    <span key={flag}>
+                      <AlertTriangle size={13} />
+                      {flag}
+                    </span>
+                  ))}
+                </div>
               )}
             </div>
             <div className="preview-row-controls">
@@ -3002,20 +3013,48 @@ function previewWithRowCategory(preview, index, category) {
 }
 
 function previewWithRows(preview, rows) {
-  const totals = summarizePreviewTotals(rows);
+  const hasAccountContext = rows.some((row) => row.account_name);
+  const flaggedRows = rows.map((row) => ({
+    ...row,
+    review_flags: previewReviewFlags(row, hasAccountContext),
+  }));
+  const totals = summarizePreviewTotals(flaggedRows);
   return {
     ...preview,
-    row_count: rows.length,
-    importable_count: rows.filter((row) => !row.duplicate).length,
-    duplicate_count: rows.filter((row) => row.duplicate).length,
-    first_transaction_date: previewDateBoundary(rows, "first"),
-    last_transaction_date: previewDateBoundary(rows, "last"),
+    row_count: flaggedRows.length,
+    importable_count: flaggedRows.filter((row) => !row.duplicate).length,
+    duplicate_count: flaggedRows.filter((row) => row.duplicate).length,
+    flagged_count: flaggedRows.filter((row) => row.review_flags?.length).length,
+    first_transaction_date: previewDateBoundary(flaggedRows, "first"),
+    last_transaction_date: previewDateBoundary(flaggedRows, "last"),
     total_spending: totals.total_spending,
     total_income: totals.total_income,
     net: totals.net,
-    categories: summarizePreviewCategories(rows),
-    rows,
+    categories: summarizePreviewCategories(flaggedRows),
+    rows: flaggedRows,
   };
+}
+
+function previewReviewFlags(row, hasAccountContext) {
+  const amount = Number(row.amount) || 0;
+  const flags = [];
+  if (row.duplicate) flags.push("Duplicate of existing transaction");
+  if (hasAccountContext && !row.account_name) flags.push("Missing account label");
+  if (amount === 0) flags.push("Zero amount");
+  if (amount < 0 && row.category === "Income") flags.push("Expense marked as income");
+  if (amount > 0 && row.category !== "Income") flags.push("Income category mismatch");
+  if (amount < 0 && row.category === "Other") {
+    flags.push("Needs category review");
+  } else if (
+    amount < 0
+    && row.category_confidence !== null
+    && row.category_confidence !== undefined
+    && Number(row.category_confidence) < 0.7
+  ) {
+    flags.push("Low category confidence");
+  }
+  if (amount <= -2000) flags.push("Large expense over $2,000.00");
+  return flags;
 }
 
 function summarizePreviewTotals(rows) {

@@ -69,6 +69,7 @@ QUESTION_STOPWORDS = {
     "why",
     "you",
 }
+PREVIEW_LARGE_EXPENSE_CENTS = 200_000
 
 
 def get_db_path() -> Path:
@@ -460,6 +461,7 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
             "categories": [],
             "rows": [],
             "errors": [],
+            "flagged_count": 0,
         }
 
     preview_rows = []
@@ -468,6 +470,8 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
     income_cents = 0
     net_cents = 0
     duplicate_count = 0
+    flagged_count = 0
+    has_account_context = any(row.get("account_name") for row in rows)
 
     with connect() as conn:
         for row in rows:
@@ -506,6 +510,16 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
             elif amount_cents > 0:
                 income_cents += amount_cents
             net_cents += amount_cents
+            review_flags = preview_review_flags(
+                amount_cents=amount_cents,
+                category=category,
+                account_name=account_name,
+                duplicate=duplicate,
+                suggestion=suggestion,
+                has_account_context=has_account_context,
+            )
+            if review_flags:
+                flagged_count += 1
 
             preview_rows.append({
                 "date": row["date"],
@@ -522,6 +536,7 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
                 "source_file": source_file,
                 "account_name": account_name,
                 "duplicate": duplicate,
+                "review_flags": review_flags,
             })
 
     dates = sorted(row["date"] for row in rows if row.get("date"))
@@ -542,6 +557,7 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
         "row_count": len(rows),
         "importable_count": len(rows) - duplicate_count,
         "duplicate_count": duplicate_count,
+        "flagged_count": flagged_count,
         "first_transaction_date": dates[0] if dates else None,
         "last_transaction_date": dates[-1] if dates else None,
         "total_spending": cents_to_dollars(spending_cents),
@@ -551,6 +567,40 @@ def preview_import(rows: list[dict], sample_limit: int = 25) -> dict:
         "rows": preview_rows[:sample_limit],
         "errors": [],
     }
+
+
+def preview_review_flags(
+    *,
+    amount_cents: int,
+    category: str,
+    account_name: str | None,
+    duplicate: bool,
+    suggestion: dict,
+    has_account_context: bool,
+) -> list[str]:
+    """Return review hints for parsed rows that may need attention before import."""
+    flags = []
+    if duplicate:
+        flags.append("Duplicate of existing transaction")
+    if has_account_context and not account_name:
+        flags.append("Missing account label")
+    if amount_cents == 0:
+        flags.append("Zero amount")
+    if amount_cents < 0 and category == "Income":
+        flags.append("Expense marked as income")
+    if amount_cents > 0 and category != "Income":
+        flags.append("Income category mismatch")
+    if amount_cents < 0 and category == "Other":
+        flags.append("Needs category review")
+    elif (
+        amount_cents < 0
+        and suggestion.get("confidence") is not None
+        and float(suggestion["confidence"]) < 0.7
+    ):
+        flags.append("Low category confidence")
+    if amount_cents <= -PREVIEW_LARGE_EXPENSE_CENTS:
+        flags.append(f"Large expense over ${cents_to_dollars(PREVIEW_LARGE_EXPENSE_CENTS):,.2f}")
+    return flags
 
 
 def record_upload(filename: str, file_type: str, rows: list[dict], result: dict, account_name: str | None = None) -> dict:

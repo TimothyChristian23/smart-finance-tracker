@@ -71,6 +71,7 @@ from app.database import (
     question_evidence,
     monthly_trends,
     preview_import,
+    preview_review_flags,
     record_upload,
     record_ask_history,
     restore_backup,
@@ -121,6 +122,7 @@ class ImportPreviewRow(BaseModel):
     source_file: str | None = None
     account_name: str | None = None
     duplicate: bool
+    review_flags: list[str] = Field(default_factory=list)
 
 
 class ImportPreviewCategory(BaseModel):
@@ -144,6 +146,7 @@ class ImportPreviewResponse(BaseModel):
     row_count: int
     importable_count: int
     duplicate_count: int
+    flagged_count: int = 0
     first_transaction_date: str | None = None
     last_transaction_date: str | None = None
     total_spending: float
@@ -745,6 +748,7 @@ def ai_preview_categories(request: AIPreviewCategoryRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except AICategorizationError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    suggested_rows = refresh_preview_review_flags(suggested_rows)
     return {
         **status,
         "warning": AI_CATEGORY_WARNING,
@@ -2309,10 +2313,34 @@ def validate_ai_preview_rows(rows: list[ImportPreviewRow]) -> list[dict]:
                 "source_file": validate_source_filename(row.source_file) if row.source_file else None,
                 "account_name": validate_account_name(row.account_name),
                 "duplicate": row.duplicate,
+                "review_flags": [flag[:120] for flag in row.review_flags[:8]],
             })
         except HTTPException as exc:
             raise HTTPException(status_code=400, detail=f"rows[{index}]: {exc.detail}") from exc
     return validated_rows
+
+
+def refresh_preview_review_flags(rows: list[dict]) -> list[dict]:
+    """Recompute review flags after preview rows are edited or AI-categorized."""
+    has_account_context = any(row.get("account_name") for row in rows)
+    refreshed = []
+    for row in rows:
+        amount_cents = dollars_to_cents(row["amount"])
+        suggestion = {
+            "confidence": row.get("category_confidence"),
+        }
+        refreshed.append({
+            **row,
+            "review_flags": preview_review_flags(
+                amount_cents=amount_cents,
+                category=row["category"],
+                account_name=row.get("account_name"),
+                duplicate=bool(row.get("duplicate")),
+                suggestion=suggestion,
+                has_account_context=has_account_context,
+            ),
+        })
+    return refreshed
 
 
 def summarize_preview_categories(rows: list[dict]) -> list[dict]:
