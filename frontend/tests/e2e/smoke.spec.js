@@ -90,6 +90,10 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
 
   await importPanel.getByRole("button", { name: "Import Reviewed" }).click();
   await expect(page.getByTestId("status-message")).toContainText(`Imported ${sampleTransactionCount} reviewed transactions`);
+  const comparisonPanel = page.getByTestId("comparison-panel");
+  await expect(comparisonPanel.getByText("Spending vs 2026-07")).toBeVisible();
+  await expect(comparisonPanel.locator(".comparison-main strong")).toHaveText("-$1,079.19");
+  await expect(comparisonPanel.getByText("$2,108.39 current | $3,187.58 previous | 33.9%")).toBeVisible();
 
   await page.getByLabel("Month").selectOption("2026-07");
   const qualityPanel = page.getByTestId("quality-panel");
@@ -192,10 +196,11 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(recurringPanel.getByText("Gym Membership")).toBeVisible();
   await recurringPanel.getByLabel("Hide recurring charge for Gym Membership").click();
   await expect(page.getByTestId("status-message")).toHaveText("Hid recurring charge for Gym Membership.");
-  await expect(recurringPanel.getByLabel("Restore recurring charge for Gym Membership")).toBeVisible();
+  const restoreRecurringButton = recurringPanel.getByLabel("Restore recurring charge for Gym Membership");
+  await expect(restoreRecurringButton).toBeEnabled();
   await expect(billPanel.getByText("Gym Membership")).toHaveCount(0);
   await expect(billPanel.getByText("No expected bills for 2026-09.")).toBeVisible();
-  await recurringPanel.getByLabel("Restore recurring charge for Gym Membership").click();
+  await restoreRecurringButton.click();
   await expect(page.getByTestId("status-message")).toHaveText("Restored recurring charge for Gym Membership.");
   await expect(recurringPanel.getByText("Gym Membership")).toBeVisible();
   await expect(billPanel.getByText("Gym Membership")).toBeVisible();

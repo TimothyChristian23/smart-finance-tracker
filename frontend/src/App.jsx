@@ -52,6 +52,7 @@ export default function App() {
   const [health, setHealth] = useState("Checking");
   const [summary, setSummary] = useState(emptySummary());
   const [insights, setInsights] = useState(emptyInsights());
+  const [comparison, setComparison] = useState(emptyMonthlyComparison());
   const [forecast, setForecast] = useState(emptyForecast());
   const [importQuality, setImportQuality] = useState(emptyImportQuality());
   const [recurringCalendar, setRecurringCalendar] = useState(emptyRecurringCalendar());
@@ -125,6 +126,7 @@ export default function App() {
       const [
         summaryPayload,
         insightPayload,
+        comparisonPayload,
         forecastPayload,
         transactionPayload,
         anomalyPayload,
@@ -152,6 +154,7 @@ export default function App() {
       ] = await Promise.all([
         request(`/summary${queryString({ month: activeMonth })}`),
         request(`/insights/monthly${queryString({ month: activeMonth })}`),
+        request(`/comparisons/monthly${queryString({ month: activeMonth, limit: 6 })}`),
         request(`/forecast/monthly${queryString({ month: activeMonth })}`),
         request(`/transactions${queryString({
           month: activeMonth,
@@ -187,6 +190,7 @@ export default function App() {
       setMonths(monthsPayload);
       setSummary(summaryPayload);
       setInsights(insightPayload);
+      setComparison(comparisonPayload);
       setForecast(forecastPayload);
       setTransactions(transactionPayload);
       setAnomalies(anomalyPayload);
@@ -1078,6 +1082,11 @@ export default function App() {
           <InsightList insights={insights} />
         </section>
 
+        <section className="panel comparison-panel" data-testid="comparison-panel">
+          <PanelTitle icon={<TrendingUp size={18} />} title="Month Compare" detail={comparison.month || selectedMonthLabel} />
+          <MonthlyComparison comparison={comparison} />
+        </section>
+
         <section className="panel forecast-panel">
           <PanelTitle icon={<CalendarClock size={18} />} title="Cash Flow Forecast" detail={forecast.month || selectedMonthLabel} />
           <ForecastSummary forecast={forecast} />
@@ -1405,6 +1414,56 @@ function InsightList({ insights }) {
           <p>{row.text}</p>
         </div>
       ))}
+    </div>
+  );
+}
+
+function MonthlyComparison({ comparison }) {
+  if (!comparison.month) return <p className="empty">No month comparison yet.</p>;
+
+  const delta = Number(comparison.spending_delta) || 0;
+  const deltaTone = delta > 0 ? "comparison-up" : delta < 0 ? "comparison-down" : "comparison-flat";
+  const deltaLabel = delta === 0 ? "$0.00" : signedMoney(delta);
+  const percentLabel = comparison.spending_delta_percent === null || comparison.spending_delta_percent === undefined
+    ? "No prior baseline"
+    : `${Math.abs(comparison.spending_delta_percent)}%`;
+  const changes = comparison.category_changes || [];
+
+  return (
+    <div className="comparison-summary">
+      <div className={`comparison-main ${deltaTone}`}>
+        <span>Spending vs {comparison.previous_month || "previous month"}</span>
+        <strong>{deltaLabel}</strong>
+        <small>
+          {money(comparison.current?.total_spending || 0)}
+          {" "}
+          current | {money(comparison.previous?.total_spending || 0)} previous | {percentLabel}
+        </small>
+      </div>
+      <div className="comparison-stats">
+        <span>Income {signedMoney(comparison.income_delta || 0)}</span>
+        <span>Net {signedMoney(comparison.net_delta || 0)}</span>
+        <span>{comparison.status.replaceAll("_", " ")}</span>
+      </div>
+      {changes.length ? (
+        <div className="comparison-changes">
+          {changes.slice(0, 4).map((item) => (
+            <div className="comparison-change-row" key={item.category}>
+              <div>
+                <strong>{item.category}</strong>
+                <span>{money(item.current_total)} vs {money(item.previous_total)}</span>
+              </div>
+              <b className={item.direction === "up" ? "change-up" : "change-down"}>{signedMoney(item.delta)}</b>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="comparison-notes">
+          {(comparison.notes || []).slice(0, 2).map((note) => (
+            <p key={note}>{note}</p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2905,6 +2964,24 @@ function emptyInsights() {
   };
 }
 
+function emptyMonthlyComparison() {
+  return {
+    month: null,
+    previous_month: null,
+    status: "no_data",
+    current: emptySummary(),
+    previous: emptySummary(),
+    spending_delta: null,
+    spending_delta_percent: null,
+    income_delta: null,
+    net_delta: null,
+    category_changes: [],
+    largest_increase: null,
+    largest_decrease: null,
+    notes: [],
+  };
+}
+
 function emptyForecast() {
   return {
     month: null,
@@ -2977,6 +3054,13 @@ function money(value) {
     style: "currency",
     currency: "USD",
   }).format(Number(value) || 0);
+}
+
+function signedMoney(value) {
+  const amount = Number(value) || 0;
+  if (amount > 0) return `+${money(amount)}`;
+  if (amount < 0) return `-${money(Math.abs(amount))}`;
+  return "$0.00";
 }
 
 function importParserLabel(parser) {

@@ -65,6 +65,7 @@ from app.database import (
     list_transaction_splits,
     list_transactions,
     list_uploads,
+    monthly_comparison,
     monthly_forecast,
     monthly_insights,
     monthly_summary,
@@ -497,6 +498,22 @@ class MonthlyInsightResponse(BaseModel):
     highlights: list[str]
     risks: list[str]
     next_actions: list[str]
+
+
+class MonthlyComparisonResponse(BaseModel):
+    month: str | None
+    previous_month: str | None
+    status: str
+    current: dict
+    previous: dict
+    spending_delta: float | None = None
+    spending_delta_percent: float | None = None
+    income_delta: float | None = None
+    net_delta: float | None = None
+    category_changes: list[dict]
+    largest_increase: dict | None = None
+    largest_decrease: dict | None = None
+    notes: list[str]
 
 
 class CashFlowForecastResponse(BaseModel):
@@ -1074,6 +1091,11 @@ async def insights(month: str | None = None) -> dict:
     return monthly_insights(month=validate_month(month))
 
 
+@app.get("/comparisons/monthly", response_model=MonthlyComparisonResponse)
+async def monthly_spending_comparison(month: str | None = None, limit: int = 6) -> dict:
+    return monthly_comparison(month=validate_month(month), limit=bounded_limit(limit, maximum=20))
+
+
 @app.get("/forecast/monthly", response_model=CashFlowForecastResponse)
 async def forecast(month: str | None = None) -> dict:
     return monthly_forecast(month=validate_month(month))
@@ -1270,6 +1292,9 @@ def answer_finance_question(question: str) -> AskResponse:
             intent="monthly_insights",
             data=[report],
         )
+
+    if looks_like_monthly_comparison_question(normalized):
+        return answer_monthly_comparison_question(month or latest_imported_month())
 
     if looks_like_bill_calendar_question(normalized):
         calendar = recurring_bill_calendar(month=month, limit=8)
@@ -2534,6 +2559,76 @@ def latest_imported_month() -> str | None:
     return months[0]["month"] if months else None
 
 
+def answer_monthly_comparison_question(month: str | None) -> AskResponse:
+    comparison = monthly_comparison(month=month)
+    comparison_month = comparison["month"]
+    previous_month = comparison["previous_month"]
+    if comparison_month is None:
+        return AskResponse(
+            answer="I need imported transactions before I can compare monthly spending.",
+            intent="monthly_comparison",
+            data=[comparison],
+        )
+    if comparison["current"]["transaction_count"] == 0:
+        return AskResponse(
+            answer=f"I do not have transactions for {comparison_month}, so I cannot compare it yet.",
+            month=comparison_month,
+            intent="monthly_comparison",
+            data=[comparison],
+        )
+    if comparison["previous"]["transaction_count"] == 0:
+        return AskResponse(
+            answer=(
+                f"I have {comparison_month} data, but no transactions for "
+                f"{previous_month} to compare against."
+            ),
+            month=comparison_month,
+            intent="monthly_comparison",
+            data=[comparison],
+        )
+
+    spending_delta = comparison["spending_delta"] or 0
+    if spending_delta == 0:
+        change_text = f"the same as {previous_month}"
+    else:
+        direction = "higher" if spending_delta > 0 else "lower"
+        percent = comparison["spending_delta_percent"]
+        percent_text = "" if percent is None else f" ({abs(percent)}%)"
+        change_text = f"{format_money(abs(spending_delta))} {direction}{percent_text}"
+
+    categories = []
+    movement_text = ""
+    largest_increase = comparison["largest_increase"]
+    largest_decrease = comparison["largest_decrease"]
+    if largest_increase:
+        categories.append(largest_increase["category"])
+        movement_text += (
+            f" Biggest category increase was {largest_increase['category']} "
+            f"at {format_signed_money(largest_increase['delta'])}."
+        )
+    if largest_decrease:
+        categories.append(largest_decrease["category"])
+        movement_text += (
+            f" Biggest category decrease was {largest_decrease['category']} "
+            f"at {format_signed_money(largest_decrease['delta'])}."
+        )
+
+    return AskResponse(
+        answer=(
+            f"Spending for {comparison_month} was "
+            f"{format_money(comparison['current']['total_spending'])} versus "
+            f"{format_money(comparison['previous']['total_spending'])} in {previous_month}, "
+            f"{change_text}. Net cash flow changed by "
+            f"{format_signed_money(comparison['net_delta'] or 0)}.{movement_text}"
+        ),
+        amount=abs(spending_delta),
+        categories=list(dict.fromkeys(categories)),
+        month=comparison_month,
+        intent="monthly_comparison",
+        data=[comparison],
+    )
+
+
 def answer_category_explanation_question(question: str, month: str | None) -> AskResponse:
     explanations = category_explanations_for_question(question, month=month, limit=5)
     explanation_month = month or latest_imported_month()
@@ -2678,6 +2773,39 @@ def looks_like_monthly_report_question(question: str) -> bool:
     )
 
 
+def looks_like_monthly_comparison_question(question: str) -> bool:
+    comparison_terms = [
+        "compare",
+        "compared",
+        "comparison",
+        "change",
+        "changed",
+        "different",
+        "difference",
+        "increase",
+        "decrease",
+        "higher",
+        "lower",
+        "more than",
+        "less than",
+        "month over month",
+        "month-over-month",
+        "versus",
+        "vs ",
+    ]
+    finance_terms = [
+        "cash flow",
+        "income",
+        "month",
+        "monthly",
+        "net",
+        "spend",
+        "spending",
+        "spent",
+    ]
+    return has_any(question, comparison_terms) and has_any(question, finance_terms)
+
+
 def looks_like_forecast_question(question: str) -> bool:
     return (
         has_any(question, ["forecast", "project", "projected", "projection", "pace", "run rate", "expected"])
@@ -2742,6 +2870,14 @@ def format_month_label(month: str | None) -> str:
 
 def format_money(value: float) -> str:
     return f"${value:,.2f}"
+
+
+def format_signed_money(value: float) -> str:
+    if value > 0:
+        return f"+{format_money(value)}"
+    if value < 0:
+        return f"-{format_money(abs(value))}"
+    return "$0.00"
 
 
 def dollars_to_cents(value: float) -> int:

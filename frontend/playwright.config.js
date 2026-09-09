@@ -5,7 +5,7 @@ const pythonCommand = process.env.SMOKE_PYTHON
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  timeout: 60000,
+  timeout: 90000,
   expect: {
     timeout: 10000,
   },

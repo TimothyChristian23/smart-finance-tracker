@@ -1048,6 +1048,118 @@ h2 {
   background: var(--blue);
 }
 
+.comparison-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.comparison-main {
+  border-left: 4px solid var(--accent);
+  background: #eef8f4;
+  padding: 12px;
+}
+
+.comparison-main.comparison-up {
+  border-color: var(--bad);
+  background: #fff3f1;
+}
+
+.comparison-main.comparison-down {
+  border-color: var(--good);
+  background: #edf8f0;
+}
+
+.comparison-main span,
+.comparison-main small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.comparison-main strong {
+  display: block;
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: 1.46rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.comparison-main small {
+  margin-top: 8px;
+}
+
+.comparison-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.comparison-stats span {
+  display: grid;
+  min-height: 40px;
+  place-items: center;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.comparison-changes,
+.comparison-notes {
+  display: grid;
+  gap: 8px;
+}
+
+.comparison-change-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  padding: 9px 10px;
+}
+
+.comparison-change-row strong,
+.comparison-change-row span {
+  display: block;
+}
+
+.comparison-change-row strong {
+  color: var(--ink);
+  font-size: 0.88rem;
+}
+
+.comparison-change-row span,
+.comparison-notes p {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.comparison-change-row b {
+  white-space: nowrap;
+}
+
+.change-up {
+  color: var(--bad);
+}
+
+.change-down {
+  color: var(--good);
+}
+
+.comparison-notes p {
+  margin: 0;
+  border: 1px solid var(--line);
+  padding: 9px 10px;
+}
+
 .forecast-summary {
   display: grid;
   gap: 12px;
@@ -1919,6 +2031,7 @@ h2 {
     justify-content: space-between;
   }
 
+  .comparison-stats,
   .forecast-stats {
     grid-template-columns: 1fr;
   }

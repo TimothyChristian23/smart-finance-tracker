@@ -2448,6 +2448,73 @@ def monthly_insights(month: str | None = None) -> dict:
     }
 
 
+def monthly_comparison(month: str | None = None, limit: int = 6) -> dict:
+    """Compare one month against the previous calendar month."""
+    comparison_month = month or _latest_month()
+    if comparison_month is None:
+        empty_summary = monthly_summary(month=None)
+        return {
+            "month": None,
+            "previous_month": None,
+            "status": "no_data",
+            "current": empty_summary,
+            "previous": empty_summary,
+            "spending_delta": None,
+            "spending_delta_percent": None,
+            "income_delta": None,
+            "net_delta": None,
+            "category_changes": [],
+            "largest_increase": None,
+            "largest_decrease": None,
+            "notes": ["Upload at least two months of transactions to compare spending."],
+        }
+
+    previous_month = _previous_month(comparison_month)
+    current_summary = monthly_summary(month=comparison_month)
+    previous_summary = monthly_summary(month=previous_month)
+    spending_delta = round(
+        current_summary["total_spending"] - previous_summary["total_spending"],
+        2,
+    )
+    income_delta = round(
+        current_summary["total_income"] - previous_summary["total_income"],
+        2,
+    )
+    net_delta = round(current_summary["net"] - previous_summary["net"], 2)
+    spending_delta_percent = _percent_delta(
+        current_summary["total_spending"],
+        previous_summary["total_spending"],
+    )
+    category_changes = _monthly_category_changes(comparison_month, previous_month, limit=limit)
+    largest_increase = next((item for item in category_changes if item["direction"] == "up"), None)
+    largest_decrease = next((item for item in category_changes if item["direction"] == "down"), None)
+
+    return {
+        "month": comparison_month,
+        "previous_month": previous_month,
+        "status": _monthly_comparison_status(current_summary, previous_summary, spending_delta),
+        "current": current_summary,
+        "previous": previous_summary,
+        "spending_delta": spending_delta,
+        "spending_delta_percent": spending_delta_percent,
+        "income_delta": income_delta,
+        "net_delta": net_delta,
+        "category_changes": category_changes,
+        "largest_increase": largest_increase,
+        "largest_decrease": largest_decrease,
+        "notes": _monthly_comparison_notes(
+            comparison_month=comparison_month,
+            previous_month=previous_month,
+            current_summary=current_summary,
+            previous_summary=previous_summary,
+            spending_delta=spending_delta,
+            spending_delta_percent=spending_delta_percent,
+            largest_increase=largest_increase,
+            largest_decrease=largest_decrease,
+        ),
+    }
+
+
 def monthly_forecast(month: str | None = None) -> dict:
     """Project month-end spending from imported activity and expected recurring charges."""
     forecast_month = month or _latest_month()
@@ -3407,6 +3474,101 @@ def _import_quality_notes(report: dict) -> list[str]:
     return notes[:5]
 
 
+def _percent_delta(current: float, previous: float) -> float | None:
+    if previous == 0:
+        return None
+    return round(((current - previous) / previous) * 100, 1)
+
+
+def _monthly_category_changes(month: str, previous_month: str, limit: int) -> list[dict]:
+    current_by_category = {
+        item["category"]: item
+        for item in category_totals(month=month)
+    }
+    previous_by_category = {
+        item["category"]: item
+        for item in category_totals(month=previous_month)
+    }
+    categories = sorted(set(current_by_category) | set(previous_by_category))
+    changes = []
+
+    for category in categories:
+        current = current_by_category.get(category, {})
+        previous = previous_by_category.get(category, {})
+        current_total = current.get("total", 0)
+        previous_total = previous.get("total", 0)
+        delta = round(current_total - previous_total, 2)
+        if delta == 0:
+            continue
+
+        changes.append({
+            "category": category,
+            "current_total": current_total,
+            "previous_total": previous_total,
+            "delta": delta,
+            "delta_percent": _percent_delta(current_total, previous_total),
+            "direction": "up" if delta > 0 else "down",
+            "current_transaction_count": current.get("transaction_count", 0),
+            "previous_transaction_count": previous.get("transaction_count", 0),
+        })
+
+    return sorted(
+        changes,
+        key=lambda item: (abs(item["delta"]), item["current_total"], item["category"]),
+        reverse=True,
+    )[:limit]
+
+
+def _monthly_comparison_status(current_summary: dict, previous_summary: dict, spending_delta: float) -> str:
+    if current_summary["transaction_count"] == 0:
+        return "no_current_data"
+    if previous_summary["transaction_count"] == 0:
+        return "no_previous_data"
+    if spending_delta > 0:
+        return "spending_up"
+    if spending_delta < 0:
+        return "spending_down"
+    return "spending_flat"
+
+
+def _monthly_comparison_notes(
+    comparison_month: str,
+    previous_month: str,
+    current_summary: dict,
+    previous_summary: dict,
+    spending_delta: float,
+    spending_delta_percent: float | None,
+    largest_increase: dict | None,
+    largest_decrease: dict | None,
+) -> list[str]:
+    if current_summary["transaction_count"] == 0:
+        return [f"No transactions found for {comparison_month}."]
+    if previous_summary["transaction_count"] == 0:
+        return [f"No transactions found for {previous_month}, so comparison is limited."]
+
+    notes = []
+    if spending_delta == 0:
+        notes.append(f"Spending matched {previous_month}.")
+    else:
+        direction = "higher" if spending_delta > 0 else "lower"
+        percent_text = "" if spending_delta_percent is None else f" ({abs(spending_delta_percent)}%)"
+        notes.append(
+            f"Spending was {_format_money(abs(spending_delta))} {direction}{percent_text} than {previous_month}."
+        )
+
+    if largest_increase:
+        notes.append(
+            f"Biggest category increase: {largest_increase['category']} "
+            f"{_format_signed_money(largest_increase['delta'])}."
+        )
+    if largest_decrease:
+        notes.append(
+            f"Biggest category decrease: {largest_decrease['category']} "
+            f"{_format_signed_money(largest_decrease['delta'])}."
+        )
+    return notes[:4]
+
+
 def _month_bounds(month: str) -> tuple[date, date]:
     start = date.fromisoformat(f"{month}-01")
     if start.month == 12:
@@ -3914,6 +4076,14 @@ def _monthly_next_actions(
 
 def _format_money(value: float) -> str:
     return f"${value:,.2f}"
+
+
+def _format_signed_money(value: float) -> str:
+    if value > 0:
+        return f"+{_format_money(value)}"
+    if value < 0:
+        return f"-{_format_money(abs(value))}"
+    return "$0.00"
 
 
 def _month_filter(month: str | None) -> tuple[str, list[str]]:

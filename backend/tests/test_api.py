@@ -50,6 +50,19 @@ CUSTOM_MAPPING_CSV = """Posted,Payee,Outflow,Inflow,Bucket,Wallet
 10/02/2026,Payroll Deposit,,3200.00,Income,Travel Checking
 """
 
+COMPARISON_CSV = """date,description,amount
+2026-07-01,Payroll Deposit,3000.00
+2026-07-02,Apartment Rent,-1000.00
+2026-07-03,Trader Joes,-100.00
+2026-07-04,Amazon Marketplace,-50.00
+2026-07-05,Blue Bottle Coffee,-40.00
+2026-08-01,Payroll Deposit,3200.00
+2026-08-02,Apartment Rent,-1100.00
+2026-08-03,Trader Joes,-120.00
+2026-08-04,Target,-220.00
+2026-08-05,Local Cafe,-10.00
+"""
+
 
 @pytest.fixture(autouse=True)
 def isolated_db(monkeypatch, tmp_path):
@@ -1901,6 +1914,64 @@ def test_analytics_endpoints_return_months_categories_trends_and_merchants():
     assert largest[0]["description"] == "Apartment Rent"
 
 
+def test_monthly_comparison_compares_previous_month_and_category_changes():
+    client.post("/transactions/upload", files={"file": ("comparison.csv", COMPARISON_CSV, "text/csv")})
+
+    response = client.get("/comparisons/monthly?month=2026-08")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["month"] == "2026-08"
+    assert payload["previous_month"] == "2026-07"
+    assert payload["status"] == "spending_up"
+    assert payload["current"]["total_spending"] == 1450.0
+    assert payload["previous"]["total_spending"] == 1190.0
+    assert payload["spending_delta"] == 260.0
+    assert payload["spending_delta_percent"] == 21.8
+    assert payload["income_delta"] == 200.0
+    assert payload["net_delta"] == -60.0
+    assert payload["largest_increase"]["category"] == "Shopping"
+    assert payload["largest_increase"]["delta"] == 170.0
+    assert payload["largest_decrease"]["category"] == "Dining"
+    assert payload["largest_decrease"]["delta"] == -30.0
+    assert payload["category_changes"][:2] == [
+        {
+            "category": "Shopping",
+            "current_total": 220.0,
+            "previous_total": 50.0,
+            "delta": 170.0,
+            "delta_percent": 340.0,
+            "direction": "up",
+            "current_transaction_count": 1,
+            "previous_transaction_count": 1,
+        },
+        {
+            "category": "Housing",
+            "current_total": 1100.0,
+            "previous_total": 1000.0,
+            "delta": 100.0,
+            "delta_percent": 10.0,
+            "direction": "up",
+            "current_transaction_count": 1,
+            "previous_transaction_count": 1,
+        },
+    ]
+    assert "Spending was $260.00 higher (21.8%) than 2026-07." in payload["notes"]
+
+
+def test_monthly_comparison_handles_missing_previous_month():
+    client.post("/transactions/upload", files={"file": ("sample.csv", SAMPLE_CSV, "text/csv")})
+
+    response = client.get("/comparisons/monthly?month=2026-07")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "no_previous_data"
+    assert payload["previous_month"] == "2026-06"
+    assert payload["spending_delta_percent"] is None
+    assert payload["notes"] == ["No transactions found for 2026-06, so comparison is limited."]
+
+
 def test_top_merchants_groups_noisy_descriptor_variants():
     client.post(
         "/transactions",
@@ -2215,6 +2286,43 @@ def test_ask_handles_monthly_report_questions():
     assert "For 2026-07, you spent $2,840.87" in payload["answer"]
     assert "Housing is $250.00 over budget." in payload["answer"]
     assert payload["data"][0]["top_category"]["category"] == "Housing"
+
+
+def test_ask_handles_monthly_comparison_questions():
+    client.post("/transactions/upload", files={"file": ("comparison.csv", COMPARISON_CSV, "text/csv")})
+
+    response = client.post(
+        "/ask",
+        json={"question": "How did August 2026 spending compare to the previous month?"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "monthly_comparison"
+    assert payload["amount"] == 260.0
+    assert payload["categories"] == ["Shopping", "Dining"]
+    assert payload["month"] == "2026-08"
+    assert "Spending for 2026-08 was $1,450.00 versus $1,190.00 in 2026-07" in payload["answer"]
+    assert "$260.00 higher (21.8%)" in payload["answer"]
+    assert "Net cash flow changed by -$60.00." in payload["answer"]
+    assert "Biggest category increase was Shopping at +$170.00." in payload["answer"]
+    assert payload["data"][0]["largest_decrease"]["category"] == "Dining"
+
+
+def test_ask_category_spending_does_not_route_to_monthly_comparison():
+    client.post("/transactions/upload", files={"file": ("comparison.csv", COMPARISON_CSV, "text/csv")})
+
+    response = client.post(
+        "/ask",
+        json={"question": "How much did I spend on groceries in August 2026?"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "category_spending"
+    assert payload["amount"] == 120.0
+    assert payload["categories"] == ["Food & Grocery"]
+    assert payload["month"] == "2026-08"
 
 
 def test_ask_handles_forecast_questions():

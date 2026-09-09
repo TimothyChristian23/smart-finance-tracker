@@ -40,10 +40,11 @@ The first implementation slice focuses on trustworthy analytics:
 - Guarded local data reset with typed confirmation
 - Monthly spending summaries
 - Monthly insight reports with highlights, risks, and next actions
+- Month-over-month spending comparisons with category movement
 - Cash-flow forecasts from imported activity and upcoming recurring charges
 - Month, category, merchant, and trend analytics
 - Basic anomaly detection with dismiss/restore controls
-- Deterministic question answering for spending, income, account, category, category explanation, merchant, budget, budget recommendation, forecast, bill calendar, recurring charge, monthly report, largest expense, and anomaly questions
+- Deterministic question answering for spending, income, account, category, category explanation, merchant, budget, budget recommendation, forecast, bill calendar, recurring charge, monthly report, monthly comparison, largest expense, and anomaly questions
 - RAG-style broad Q&A with cited transaction and summary evidence
 - Local Q&A history for recent finance questions and answers
 - React dashboard scaffold
@@ -155,6 +156,7 @@ Useful API endpoints:
 ```text
 GET  /summary?month=2026-07
 GET  /insights/monthly?month=2026-07
+GET  /comparisons/monthly?month=2026-08
 GET  /forecast/monthly?month=2026-08
 GET  /months
 GET  /uploads
@@ -292,6 +294,10 @@ monthly insight anomaly counts, and anomaly Q&A until restored with
 Monthly insight reports combine summary totals, budget progress, recurring charges,
 top merchants, largest expenses, and anomalies into a deterministic snapshot. Ask
 `Give me my monthly report for July 2026` to route the Q&A panel to that same report.
+
+Month-over-month comparisons show spending, income, net cash-flow, and category
+movement against the previous calendar month. Ask `How did August 2026 spending
+compare to the previous month?` to get the same comparison through the Q&A panel.
 
 Cash-flow forecasts estimate month-end spending from imported activity and upcoming
 recurring charges. Ask `What am I projected to spend in August 2026?` to get the
