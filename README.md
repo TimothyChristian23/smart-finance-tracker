@@ -9,7 +9,7 @@ The first implementation slice focuses on trustworthy analytics:
 - CSV transaction upload
 - Text-based PDF statement upload
 - Import preview with parser diagnostics and duplicate estimates before saving
-- Reviewed import flow with editable preview categories before saving
+- Reviewed import flow with editable/removable preview rows before saving
 - Manual transaction entry for cash purchases or one-off corrections
 - Flexible CSV parsing for common bank column names and debit/credit formats
 - Saved CSV mapping presets for bank-specific statement headers
@@ -225,8 +225,8 @@ Statements that are scanned images will need OCR support before they can be impo
 
 Use import preview from the dashboard or `POST /transactions/preview` to inspect
 normalized rows, category assignments, totals, and duplicate estimates before
-saving statement data. In the dashboard, preview categories can be edited before
-saving through the reviewed import flow. CSV preview keeps valid rows visible and
+saving statement data. In the dashboard, preview rows can be edited or removed
+before saving through the reviewed import flow. CSV preview keeps valid rows visible and
 reports row-level errors for lines that need cleanup; direct file importing remains
 strict and rejects files with invalid rows. Preview diagnostics show the parser used,
 line counts, skipped candidate lines, and statement-specific notes.

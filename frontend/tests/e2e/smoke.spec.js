@@ -53,6 +53,17 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await importPanel.getByRole("button", { name: "Preview" }).click();
   await expect(page.getByTestId("status-message")).toHaveText("Previewed 2 rows from custom-bank.csv.");
   await expect(importPanel.getByText("Farmers Market", { exact: true })).toBeVisible();
+  await importPanel.getByLabel("Edit preview row for Farmers Market").click();
+  const previewRowModal = page.getByTestId("preview-row-modal");
+  await expect(previewRowModal.getByRole("heading", { name: "Edit Preview Row" })).toBeVisible();
+  await previewRowModal.getByLabel("Description").fill("Farmers Market Stand");
+  await previewRowModal.getByLabel("Amount").fill("-45.37");
+  await previewRowModal.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByTestId("status-message")).toHaveText("Updated preview row for Farmers Market Stand.");
+  await expect(importPanel.getByText("Farmers Market Stand", { exact: true })).toBeVisible();
+  await importPanel.getByLabel("Remove preview row for Payroll Deposit").click();
+  await expect(page.getByTestId("status-message")).toHaveText("Removed Payroll Deposit from preview.");
+  await expect(importPanel.getByText("1 importable")).toBeVisible();
 
   await importPanel.locator('input[name="statement"]').setInputFiles(sampleCsvPath);
   await importPanel.getByPlaceholder("Account label").fill("Chase Checking");

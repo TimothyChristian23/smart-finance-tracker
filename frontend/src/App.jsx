@@ -82,6 +82,8 @@ export default function App() {
   const [transactionFilters, setTransactionFilters] = useState({ account: "", category: "", search: "" });
   const [month, setMonth] = useState("");
   const [uploadPreview, setUploadPreview] = useState(null);
+  const [editingPreviewRowIndex, setEditingPreviewRowIndex] = useState(null);
+  const [previewRowDraft, setPreviewRowDraft] = useState(emptyPreviewRowDraft());
   const [uploadStatus, setUploadStatus] = useState("");
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [answer, setAnswer] = useState(null);
@@ -249,7 +251,7 @@ export default function App() {
       setUploadStatus(skipped
         ? `Imported ${payload.imported} transactions and skipped ${skipped} duplicates from ${payload.filename}.`
         : `Imported ${payload.imported} transactions from ${payload.filename}.`);
-      setUploadPreview(null);
+      clearPreviewState();
       form.reset();
       await refreshDashboard();
     } catch (error) {
@@ -279,9 +281,13 @@ export default function App() {
         body: formData,
       });
       setUploadPreview(preview);
+      setEditingPreviewRowIndex(null);
+      setPreviewRowDraft(emptyPreviewRowDraft());
       setUploadStatus(`Previewed ${preview.row_count} rows from ${preview.filename}.`);
     } catch (error) {
       setUploadPreview(null);
+      setEditingPreviewRowIndex(null);
+      setPreviewRowDraft(emptyPreviewRowDraft());
       setUploadStatus(error.message);
     } finally {
       setBusy(false);
@@ -313,7 +319,7 @@ export default function App() {
       setUploadStatus(skipped
         ? `Imported ${payload.imported} reviewed transactions and skipped ${skipped} duplicates from ${payload.filename}.`
         : `Imported ${payload.imported} reviewed transactions from ${payload.filename}.`);
-      setUploadPreview(null);
+      clearPreviewState();
       form.reset();
       await refreshDashboard();
     } catch (error) {
@@ -325,6 +331,85 @@ export default function App() {
 
   function handlePreviewCategoryChange(index, category) {
     setUploadPreview((preview) => previewWithRowCategory(preview, index, category));
+  }
+
+  function handleOpenPreviewRowEditor(index) {
+    const row = uploadPreview?.rows?.[index];
+    if (!row) return;
+    setEditingPreviewRowIndex(index);
+    setPreviewRowDraft({
+      date: row.date,
+      description: row.description,
+      amount: String(row.amount),
+      category: row.category,
+      account_name: row.account_name || "",
+    });
+  }
+
+  function handleClosePreviewRowEditor() {
+    setEditingPreviewRowIndex(null);
+    setPreviewRowDraft(emptyPreviewRowDraft());
+  }
+
+  function handlePreviewRowEditSubmit(event) {
+    event.preventDefault();
+    const amount = Number(previewRowDraft.amount);
+    const description = previewRowDraft.description.trim();
+    if (!description) {
+      setUploadStatus("Preview row description is required.");
+      return;
+    }
+    if (!Number.isFinite(amount)) {
+      setUploadStatus("Preview row amount must be a number.");
+      return;
+    }
+    setUploadPreview((preview) => {
+      if (!preview || editingPreviewRowIndex === null) return preview;
+      const rows = preview.rows.map((row, rowIndex) => {
+        if (rowIndex !== editingPreviewRowIndex) return row;
+        return {
+          ...row,
+          date: previewRowDraft.date,
+          description,
+          amount,
+          category: previewRowDraft.category,
+          suggested_category: previewRowDraft.category,
+          category_confidence: null,
+          category_confidence_label: "reviewed",
+          category_source: "manual_review",
+          category_source_label: "Manual review",
+          category_reason: "Row details edited during import review.",
+          matched_terms: [],
+          account_name: previewRowDraft.account_name.trim() || null,
+          duplicate: false,
+        };
+      });
+      return previewWithRows(preview, rows);
+    });
+    setUploadStatus(`Updated preview row for ${description}.`);
+    handleClosePreviewRowEditor();
+  }
+
+  function handleRemovePreviewRow(index) {
+    const row = uploadPreview?.rows?.[index];
+    if (!row) return;
+    setUploadPreview((preview) => {
+      if (!preview) return preview;
+      return previewWithRows(
+        preview,
+        preview.rows.filter((_, rowIndex) => rowIndex !== index),
+      );
+    });
+    setUploadStatus(`Removed ${row.description} from preview.`);
+    if (editingPreviewRowIndex === index) {
+      handleClosePreviewRowEditor();
+    }
+  }
+
+  function clearPreviewState() {
+    setUploadPreview(null);
+    setEditingPreviewRowIndex(null);
+    setPreviewRowDraft(emptyPreviewRowDraft());
   }
 
   async function handleAIPreviewCategories() {
@@ -390,7 +475,7 @@ export default function App() {
       setUploadStatus("Transactions cleared.");
       setAnswer(null);
       setMonth("");
-      setUploadPreview(null);
+      clearPreviewState();
       setCreatingTransaction(false);
       setEditingTransaction(null);
       await refreshDashboard();
@@ -415,7 +500,7 @@ export default function App() {
       setUploadStatus("All local finance data cleared.");
       setAnswer(null);
       setMonth("");
-      setUploadPreview(null);
+      clearPreviewState();
       setCreatingTransaction(false);
       setEditingTransaction(null);
       setAskHistory([]);
@@ -464,7 +549,7 @@ export default function App() {
       setUploadStatus(`Restored ${payload.counts.transactions} transactions from backup.`);
       setAnswer(null);
       setMonth("");
-      setUploadPreview(null);
+      clearPreviewState();
       setCreatingTransaction(false);
       setEditingTransaction(null);
       setAskHistory([]);
@@ -1052,9 +1137,9 @@ export default function App() {
         <section className="panel action-panel" data-testid="import-panel">
           <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV/PDF" />
           <form className="upload-form" onSubmit={handleUpload}>
-            <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={() => setUploadPreview(null)} />
-            <input name="accountName" type="text" maxLength={80} placeholder="Account label" onChange={() => setUploadPreview(null)} />
-            <select name="csvPresetId" aria-label="CSV mapping preset" onChange={() => setUploadPreview(null)}>
+            <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={clearPreviewState} />
+            <input name="accountName" type="text" maxLength={80} placeholder="Account label" onChange={clearPreviewState} />
+            <select name="csvPresetId" aria-label="CSV mapping preset" onChange={clearPreviewState}>
               <option value="">Auto mapping</option>
               {csvPresets.map((preset) => (
                 <option key={preset.id} value={preset.id}>{preset.name}</option>
@@ -1095,6 +1180,8 @@ export default function App() {
               categoryOptions={categoryOptions}
               onAskAI={handleAIPreviewCategories}
               onCategoryChange={handlePreviewCategoryChange}
+              onEditRow={handleOpenPreviewRowEditor}
+              onRemoveRow={handleRemovePreviewRow}
               preview={uploadPreview}
             />
           )}
@@ -1228,6 +1315,17 @@ export default function App() {
         </div>
         {!visibleTransactions.length && <p className="empty">No matching transactions.</p>}
       </section>
+
+      {editingPreviewRowIndex !== null && (
+        <PreviewRowEditModal
+          busy={busy}
+          categoryOptions={categoryOptions}
+          draft={previewRowDraft}
+          onClose={handleClosePreviewRowEditor}
+          onDraftChange={setPreviewRowDraft}
+          onSubmit={handlePreviewRowEditSubmit}
+        />
+      )}
 
       {(creatingTransaction || editingTransaction) && (
         <TransactionEditModal
@@ -1779,7 +1877,7 @@ function AccountSummaryList({ accounts }) {
   );
 }
 
-function ImportPreview({ aiStatus, busy, categoryOptions, onAskAI, onCategoryChange, preview }) {
+function ImportPreview({ aiStatus, busy, categoryOptions, onAskAI, onCategoryChange, onEditRow, onRemoveRow, preview }) {
   const errors = preview.errors || [];
   const diagnostics = preview.diagnostics;
   const diagnosticDetails = diagnostics
@@ -1858,6 +1956,28 @@ function ImportPreview({ aiStatus, busy, categoryOptions, onAskAI, onCategoryCha
                   <option key={category} value={category}>{category}</option>
                 ))}
               </select>
+              <div className="preview-row-actions">
+                <button
+                  aria-label={`Edit preview row for ${row.description}`}
+                  className="row-icon-button"
+                  disabled={busy}
+                  onClick={() => onEditRow(index)}
+                  title="Edit preview row"
+                  type="button"
+                >
+                  <Pencil size={15} />
+                </button>
+                <button
+                  aria-label={`Remove preview row for ${row.description}`}
+                  className="row-icon-button danger-row-button"
+                  disabled={busy}
+                  onClick={() => onRemoveRow(index)}
+                  title="Remove preview row"
+                  type="button"
+                >
+                  <X size={15} />
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -2219,6 +2339,89 @@ function TransactionRow({ categoryOptions, deleting, onCategoryChange, onDelete,
   );
 }
 
+function PreviewRowEditModal({ busy, categoryOptions, draft, onClose, onDraftChange, onSubmit }) {
+  return (
+    <div className="modal-backdrop">
+      <section
+        className="modal"
+        data-testid="preview-row-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="preview-row-edit-title"
+      >
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">Import review</p>
+            <h2 id="preview-row-edit-title">Edit Preview Row</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Close preview row form" title="Close form">
+            <X size={18} />
+          </button>
+        </div>
+        <form className="transaction-edit-form" onSubmit={onSubmit}>
+          <label>
+            Date
+            <input
+              onChange={(event) => onDraftChange({ ...draft, date: event.target.value })}
+              required
+              type="date"
+              value={draft.date}
+            />
+          </label>
+          <label>
+            Description
+            <input
+              maxLength={200}
+              onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
+              required
+              value={draft.description}
+            />
+          </label>
+          <label>
+            Amount
+            <input
+              onChange={(event) => onDraftChange({ ...draft, amount: event.target.value })}
+              required
+              step="0.01"
+              type="number"
+              value={draft.amount}
+            />
+          </label>
+          <label>
+            Category
+            <select
+              onChange={(event) => onDraftChange({ ...draft, category: event.target.value })}
+              required
+              value={draft.category}
+            >
+              {!draft.category && <option value="">Category</option>}
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </label>
+          <label className="full-span">
+            Account
+            <input
+              maxLength={80}
+              onChange={(event) => onDraftChange({ ...draft, account_name: event.target.value })}
+              placeholder="Account label"
+              value={draft.account_name}
+            />
+          </label>
+          <div className="modal-actions full-span">
+            <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
+            <button type="submit" disabled={busy || !draft.category}>
+              <Check size={16} />
+              Save
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function TransactionEditModal({
   busy,
   categoryOptions,
@@ -2527,6 +2730,16 @@ function emptyTransactionDraft() {
   };
 }
 
+function emptyPreviewRowDraft() {
+  return {
+    date: "",
+    description: "",
+    amount: "",
+    category: "",
+    account_name: "",
+  };
+}
+
 function emptyRuleDraft() {
   return {
     merchant: "",
@@ -2785,11 +2998,52 @@ function previewWithRowCategory(preview, index, category) {
       matched_terms: [],
     };
   });
+  return previewWithRows(preview, rows);
+}
+
+function previewWithRows(preview, rows) {
+  const totals = summarizePreviewTotals(rows);
   return {
     ...preview,
+    row_count: rows.length,
+    importable_count: rows.filter((row) => !row.duplicate).length,
+    duplicate_count: rows.filter((row) => row.duplicate).length,
+    first_transaction_date: previewDateBoundary(rows, "first"),
+    last_transaction_date: previewDateBoundary(rows, "last"),
+    total_spending: totals.total_spending,
+    total_income: totals.total_income,
+    net: totals.net,
     categories: summarizePreviewCategories(rows),
     rows,
   };
+}
+
+function summarizePreviewTotals(rows) {
+  const totals = rows.reduce((currentTotals, row) => {
+    const amount = Number(row.amount) || 0;
+    if (amount < 0) currentTotals.total_spending += Math.abs(amount);
+    if (amount > 0) currentTotals.total_income += amount;
+    currentTotals.net += amount;
+    return currentTotals;
+  }, {
+    total_spending: 0,
+    total_income: 0,
+    net: 0,
+  });
+  return {
+    total_spending: Number(totals.total_spending.toFixed(2)),
+    total_income: Number(totals.total_income.toFixed(2)),
+    net: Number(totals.net.toFixed(2)),
+  };
+}
+
+function previewDateBoundary(rows, boundary) {
+  const dates = rows
+    .map((row) => row.date)
+    .filter(Boolean)
+    .sort();
+  if (!dates.length) return null;
+  return boundary === "first" ? dates[0] : dates[dates.length - 1];
 }
 
 function summarizePreviewCategories(rows) {
