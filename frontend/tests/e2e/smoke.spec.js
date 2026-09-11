@@ -25,6 +25,8 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Smart Personal Finance Tracker" })).toBeVisible();
   await expect(page.getByText("Online")).toBeVisible();
+  await expect(page.getByTestId("starter-panel")).toBeVisible();
+  await expect(page.getByTestId("starter-panel").getByRole("button", { name: "Import Statement" })).toBeVisible();
 
   const importPanel = page.getByTestId("import-panel");
   await expect(importPanel.getByRole("button", { name: "Load Samples" })).toBeVisible();

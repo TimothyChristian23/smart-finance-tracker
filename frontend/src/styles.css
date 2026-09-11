@@ -222,6 +222,40 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.starter-panel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  border-left: 4px solid var(--accent);
+}
+
+.starter-panel .panel-title {
+  margin-bottom: 0;
+}
+
+.starter-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.starter-actions button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 850;
+}
+
+.starter-actions .starter-secondary {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.8fr) minmax(280px, 0.8fr);
@@ -1932,6 +1966,10 @@ h2 {
 
   .metrics-grid {
     gap: 10px;
+  }
+
+  .starter-actions {
+    grid-template-columns: 1fr;
   }
 
   .button-row {

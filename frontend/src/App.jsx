@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -98,8 +98,11 @@ export default function App() {
   const [updatingTransactionId, setUpdatingTransactionId] = useState(null);
   const [deletingTransactionId, setDeletingTransactionId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState("");
+  const importPanelRef = useRef(null);
+  const askPanelRef = useRef(null);
 
   const selectedMonthLabel = month || "All imported data";
+  const hasTransactions = summary.transaction_count > 0;
   const hasLocalData = Boolean(
     months.length
     || uploads.length
@@ -1032,6 +1035,17 @@ export default function App() {
     window.location.assign(`${API_BASE}/data/export`);
   }
 
+  function handleJumpToImport() {
+    importPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    importPanelRef.current?.querySelector('input[name="statement"]')?.focus();
+  }
+
+  function handleJumpToAsk() {
+    setQuestion((current) => current || DEFAULT_QUESTION);
+    askPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    askPanelRef.current?.querySelector("textarea")?.focus();
+  }
+
   const visibleTransactions = useMemo(() => transactions.slice(0, 20), [transactions]);
   const trendDomain = useMemo(() => [0, "auto"], []);
 
@@ -1064,6 +1078,26 @@ export default function App() {
         <Metric label="Net" value={money(summary.net)} tone={summary.net >= 0 ? "income" : "spend"} />
         <Metric label="Transactions" value={summary.transaction_count} />
       </section>
+
+      {!hasTransactions && (
+        <section className="panel starter-panel" data-testid="starter-panel">
+          <PanelTitle icon={<Sparkles size={18} />} title="No Transactions Yet" detail="First run" />
+          <div className="starter-actions">
+            <button type="button" disabled={busy} onClick={handleLoadDemoData}>
+              <Sparkles size={16} />
+              Load Samples
+            </button>
+            <button className="starter-secondary" type="button" disabled={busy} onClick={handleJumpToImport}>
+              <FileUp size={16} />
+              Import Statement
+            </button>
+            <button className="starter-secondary" type="button" disabled={busy} onClick={handleJumpToAsk}>
+              <MessageSquare size={16} />
+              Ask
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="dashboard-grid">
         <section className="panel chart-panel">
@@ -1163,7 +1197,7 @@ export default function App() {
           />
         </section>
 
-        <section className="panel action-panel" data-testid="import-panel">
+        <section className="panel action-panel" data-testid="import-panel" ref={importPanelRef}>
           <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV/PDF" />
           <form className="upload-form" onSubmit={handleUpload}>
             <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={clearPreviewState} />
@@ -1266,7 +1300,7 @@ export default function App() {
           </form>
         </section>
 
-        <section className="panel ask-panel" data-testid="ask-panel">
+        <section className="panel ask-panel" data-testid="ask-panel" ref={askPanelRef}>
           <PanelTitle icon={<MessageSquare size={18} />} title="Ask About Spending" detail={selectedMonthLabel} />
           <form className="ask-form" onSubmit={handleAsk}>
             <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={3} />
