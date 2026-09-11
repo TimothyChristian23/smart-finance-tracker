@@ -73,7 +73,7 @@ test("imports, edits, deletes, restores, and answers from the UI", async ({ page
   await expect(importPanel.getByText("1 importable")).toBeVisible();
 
   await importPanel.locator('input[name="statement"]').setInputFiles(sampleCsvPath);
-  await importPanel.getByPlaceholder("Account label").fill("Chase Checking");
+  await importPanel.getByLabel("Account label").fill("Chase Checking");
   await importPanel.getByLabel("CSV mapping preset").selectOption("");
   await importPanel.getByRole("button", { name: "Preview" }).click();
   await expect(page.getByTestId("status-message")).toHaveText(
