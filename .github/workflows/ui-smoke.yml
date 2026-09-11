@@ -7,6 +7,7 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -38,10 +39,12 @@ jobs:
 
       - name: Install Playwright browser
         working-directory: frontend
+        timeout-minutes: 8
         run: npx playwright install --with-deps chromium
 
       - name: Run UI smoke test
         working-directory: frontend
+        timeout-minutes: 5
         env:
           SMOKE_PYTHON: python
         run: npm run test:e2e
