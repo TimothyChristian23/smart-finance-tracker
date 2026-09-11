@@ -1,97 +1,73 @@
 # Smart Personal Finance Tracker
 
-A full-stack personal finance assistant that imports bank statement data, categorizes
-transactions, detects unusual spending, and answers natural-language questions using
-structured transaction data.
+A full-stack personal finance assistant for importing bank statements, cleaning
+merchant data, categorizing spending, spotting unusual activity, and answering
+natural-language questions from local transaction records.
 
-The first implementation slice focuses on trustworthy analytics:
+The app is designed around a simple trust rule: exact totals come from
+deterministic database queries, while AI Assist is optional and only suggests
+categories after explicit user confirmation.
 
-- CSV transaction upload
-- Text-based PDF statement upload
-- Import preview with parser diagnostics, review flags, and duplicate estimates before saving
-- Reviewed import flow with editable/removable preview rows before saving
-- Manual transaction entry for cash purchases or one-off corrections
-- Flexible CSV parsing for common bank column names and debit/credit formats
-- Saved CSV mapping presets for bank-specific statement headers
-- Merchant cleanup for noisy bank descriptors and payment reference codes
-- Optional account labels for statement imports and transaction filtering
-- Account-level spending, income, and net summaries
-- Upload history with imported and duplicate counts
-- Import quality report for duplicate skips, category review needs, anomalies, and recurring detections
-- SQLite transaction storage
-- Versioned SQLite schema migrations for safe local database upgrades
-- Explainable starter categorization with confidence, source, and matched merchant signals
-- Optional OpenAI-powered AI Assist for import preview and review-only category suggestions
-- Editable transaction categories
-- Category review queue with confidence-scored suggestions
-- Dismissible category suggestions that can be restored when the app gets it wrong
-- Saved normalized merchant rules that apply to future imports
-- Direct merchant rule creation with optional retroactive category updates
-- Editable transaction details for date, description, signed amount, category, and account
-- Expense transaction splitting across categories with notes and split-aware analytics
-- Individual transaction deletion with confirmation
-- Monthly category budgets with live progress
-- Budget recommendations from recent history and recurring charges
-- Recurring charge and subscription detection with hide/restore controls
-- Recurring bill calendar for expected upcoming charges
-- Transaction search, category filtering, and CSV export
-- Full local JSON backup export for transactions, transaction splits, uploads, budgets, merchant rules, category review dismissals, CSV mapping presets, recurring ignore preferences, anomaly dismissals, and Q&A history
-- Guarded JSON backup restore for moving or recovering local development data
-- Guarded local data reset with typed confirmation
-- Monthly spending summaries
-- Monthly insight reports with highlights, risks, and next actions
-- Month-over-month spending comparisons with category movement
-- Cash-flow forecasts from imported activity and upcoming recurring charges
-- Month, category, merchant, and trend analytics
-- Basic anomaly detection with dismiss/restore controls
-- Deterministic question answering for spending, income, account, category, category explanation, merchant, budget, budget recommendation, forecast, bill calendar, recurring charge, monthly report, monthly comparison, largest expense, and anomaly questions
-- RAG-style broad Q&A with cited transaction and summary evidence
-- Local Q&A history for recent finance questions and answers
-- React dashboard scaffold
-- Locked frontend dependency install and production build
-- Browser UI smoke test for import, manual transactions, transaction splitting, backup/restore, and Q&A
-- GitHub Actions backend test, frontend build, and UI smoke workflows
+## Highlights
 
-Future LLM layers can improve ambiguous categorization, explain trends, and add
-RAG over statement notes and transaction context.
+- React dashboard with FastAPI backend and SQLite storage
+- CSV and text-based PDF statement import
+- Import preview with diagnostics, duplicate estimates, and review flags
+- Editable reviewed-import rows before saving
+- Flexible bank CSV header mapping presets
+- Merchant cleanup for noisy bank descriptors
+- Explainable category suggestions with confidence and matched signals
+- Optional OpenAI AI Assist for category suggestions
+- Manual transaction entry, editing, deletion, and split expenses
+- Account labels, account summaries, transaction search, and CSV export
+- Budgets, budget recommendations, recurring charges, and bill calendar
+- Anomaly detection with dismiss and restore controls
+- Monthly insights, month-over-month comparison, and cash-flow forecast
+- Deterministic Q&A with citations and local Q&A history
+- Full local JSON backup, guarded restore, and typed reset
+- Backend, frontend, and browser smoke-test GitHub Actions
 
-## Project Structure
+## Tech Stack
+
+- Backend: FastAPI, Pydantic, SQLite, pypdf, pytest
+- Frontend: React, Vite, Recharts, lucide-react, Playwright
+- Storage: local SQLite database at `data/finance.sqlite3` by default
+- CI: GitHub Actions for backend tests, frontend build, and UI smoke test
+
+## Demo Flow
+
+1. Start the backend and frontend with the commands below.
+2. Open `http://localhost:5173`.
+3. Click `Load Samples` in the first-run panel or Import Statement panel.
+4. Use the month selector to inspect July and August 2026.
+5. Review Category Spend, Month Compare, Cash Flow Forecast, Bill Calendar,
+   Import Quality, Category Review, and Anomalies.
+6. Try these Q&A prompts:
 
 ```text
-smart-finance-tracker/
-|-- backend/
-|   |-- app/
-|   |   |-- categorization.py
-|   |   |-- database.py
-|   |   `-- main.py
-|   |-- tests/
-|   |   `-- test_api.py
-|   |-- pytest.ini
-|   `-- requirements.txt
-|-- frontend/
-|   |-- src/
-|   |   |-- App.jsx
-|   |   |-- main.jsx
-|   |   `-- styles.css
-|   |-- index.html
-|   |-- package-lock.json
-|   `-- package.json
-|-- data/
-|   |-- sample_recurring_transactions.csv
-|   `-- sample_transactions.csv
-|-- docs/
-|   `-- architecture.md
-|-- .env.example
-|-- .gitignore
-`-- README.md
+How much did I spend on food in July 2026?
+Tell me about Amazon in July 2026
+How did August 2026 spending compare to the previous month?
+What bills are due in August 2026?
+What budgets do you recommend for August 2026?
+Why was Trader Joes categorized as Food & Grocery in July 2026?
 ```
 
-## Backend Quick Start
+The bundled sample files are synthetic and live in `data/`:
 
-```bash
+```text
+data/sample_transactions.csv
+data/sample_recurring_transactions.csv
+```
+
+## Run Locally
+
+Create and run the backend:
+
+```powershell
 cd backend
-python -m venv .venv
-.venv\Scripts\activate
+python -m venv ..\.venv
+..\.venv\Scripts\activate
 python -m pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
@@ -102,120 +78,64 @@ Open the API docs:
 http://localhost:8000/docs
 ```
 
-Optional AI Assist:
+Install and run the frontend:
 
-```bash
-copy .env.example .env
-# Add your key to OPENAI_API_KEY before using AI Assist.
-```
-
-## Database Migrations
-
-SQLite uses `FINANCE_DB_PATH`, defaulting to `./data/finance.sqlite3`. Every
-backend connection creates a `schema_migrations` ledger, applies unapplied
-migrations from `backend/app/database.py`, and updates SQLite `PRAGMA
-user_version`.
-
-The current baseline is `0001 current_local_finance_schema`. Future schema
-changes should add a new migration entry instead of editing an old migration, so
-existing local databases can upgrade safely.
-
-## Frontend Quick Start
-
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-If npm fails on Windows with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, run the install with the Windows certificate store enabled:
+Open the app:
+
+```text
+http://localhost:5173
+```
+
+If npm fails on Windows with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, use the Windows
+certificate store before installing:
 
 ```powershell
 $env:NODE_OPTIONS="--use-system-ca"
 npm.cmd install
 ```
 
-Open the React app:
+## Optional AI Assist
 
-```text
-http://localhost:5173
+AI Assist is disabled unless `OPENAI_API_KEY` is configured on the backend.
+
+```powershell
+copy .env.example .env
+# Add OPENAI_API_KEY to .env
 ```
 
-## Try The Sample Data
+By default the app uses `gpt-5-nano` for category suggestions. You can override
+that with `OPENAI_CATEGORY_MODEL`.
 
-Click `Load Samples` in the Import Statement panel to seed the app with bundled
-synthetic checking and recurring-charge statements. You can also upload
-`data/sample_transactions.csv` through the frontend or API manually. Then ask:
+The dashboard warns before sending any candidates to OpenAI. The sent fields are
+transaction descriptions, cleaned merchant names, dates, amounts, current
+categories, local suggestions, local reasons, and account labels. AI Assist does
+not import data or automatically change saved transactions.
 
-```text
-How much did I spend on food last month?
-Tell me about Amazon in July 2026
-How much did I spend on Chase Checking in July 2026?
-```
+## Statement Import
 
-Useful API endpoints:
+CSV imports accept common bank-style headers, including:
 
 ```text
-GET  /summary?month=2026-07
-GET  /insights/monthly?month=2026-07
-GET  /comparisons/monthly?month=2026-08
-GET  /forecast/monthly?month=2026-08
-GET  /months
-GET  /uploads
-GET  /imports/quality?month=2026-07
-POST /demo/sample-data
-GET  /ai/categorization/status
-POST /categories/review/ai?month=2026-07
-GET  /categories/review/ignored
-POST /categories/review/{transaction_id}/ignore
-DELETE /categories/review/ignored/{ignore_id}
-GET  /csv-mapping-presets
-POST /transactions
-POST /transactions/preview
-POST /transactions/preview/ai
-POST /transactions/import-reviewed
-GET  /transactions?month=2026-07&category=Dining&search=coffee
-GET  /transactions/export?month=2026-07
-GET  /data/export
-POST /data/import
-GET  /accounts
-GET  /accounts/summary?month=2026-07
-GET  /ask/history
-GET  /categories?month=2026-07
-GET  /categories/review?month=2026-07
-GET  /category-options
-GET  /budgets?month=2026-07
-GET  /budgets/recommendations?month=2026-08
-GET  /trends
-GET  /merchants?month=2026-07
-GET  /merchant-rules
-GET  /recurring
-GET  /recurring/calendar?month=2026-08
-GET  /recurring/ignored
-GET  /expenses/largest?month=2026-07
-GET  /anomalies?month=2026-07
-GET  /anomalies/ignored
-PUT  /budgets
-PUT  /merchant-rules
-PUT  /csv-mapping-presets
-POST /recurring/ignored
-POST /anomalies/{id}/ignore
-PATCH /transactions/{id}/category
-PATCH /transactions/{id}
-GET  /transactions/{id}/splits
-PUT  /transactions/{id}/splits
-DELETE /transactions/{id}/splits
-DELETE /transactions/{id}
-DELETE /budgets/{id}
-DELETE /merchant-rules/{id}
-DELETE /csv-mapping-presets/{id}
-DELETE /recurring/ignored/{id}
-DELETE /anomalies/ignored/{id}
-DELETE /data?confirmation=RESET
-POST /ask
+Date, Posting Date, Transaction Date, Description, Transaction Description,
+Payee, Memo, Amount, Transaction Amount, Debit Amount, Credit Amount,
+Debit/Credit, Card Member, Account #
 ```
 
-PDF uploads are supported when the statement exposes selectable text with rows like:
+Debit values are stored as expenses even when the export includes a minus sign
+or parentheses. Unsigned amount columns can use `Type`, `Details`, or a
+debit/credit column to determine direction.
+
+For banks with unusual headers, save a CSV mapping preset from the dashboard or
+`PUT /csv-mapping-presets`, then choose it during preview or direct import.
+
+Text-based PDF uploads are supported when the statement exposes selectable text
+with transaction-like rows:
 
 ```text
 2026-07-02 Trader Joes -86.42
@@ -224,150 +144,187 @@ Jul 16 Starbucks -8.75
 2026-07-17, Trader Joes, Debit 54.23
 ```
 
-Rows without a year use a year inferred from the statement text or filename. Unsigned
-PDF amounts are treated as expenses unless the row includes a credit/deposit signal.
-Statements that are scanned images will need OCR support before they can be imported.
+Rows without a year use a year inferred from statement text or filename.
+Scanned-image statements need OCR support before they can be imported.
 
-Use import preview from the dashboard or `POST /transactions/preview` to inspect
-normalized rows, category assignments, totals, and duplicate estimates before
-saving statement data. In the dashboard, preview rows can be edited or removed
-before saving through the reviewed import flow. CSV preview keeps valid rows visible and
-reports row-level errors for lines that need cleanup; direct file importing remains
-strict and rejects files with invalid rows. Preview diagnostics show the parser used,
-line counts, skipped candidate lines, and statement-specific notes. Preview review
-flags call out rows that may need attention before import, including duplicates,
-uncategorized expenses, amount/category mismatches, partial account labels, zero
-amounts, and very large expenses.
-CSV imports accept common bank-style headers such as `Date`, `Posting Date`,
-`Transaction Date`, `Description`, `Transaction Description`, `Payee`, `Memo`,
-`Amount`, `Transaction Amount`, `Debit Amount`, `Credit Amount`, `Debit/Credit`,
-`Card Member`, and `Account #`. Debit values are stored as expenses even when the
-export already includes a minus sign or parentheses, and unsigned amount columns
-can use a `Type`, `Details`, or debit/credit column for direction.
-For banks with unusual headers, save a CSV mapping preset from the dashboard or
-`PUT /csv-mapping-presets`, then choose it during preview or direct import. A
-preset can map date, description, signed amount or debit/credit columns, optional
-type, category, and account columns.
-Imported statement descriptors are cleaned into stable merchant names before
-categorization, duplicate checks, recurring-charge detection, merchant summaries,
-and saved merchant rules run.
-Use the dashboard account label field or CSV headers like `Account` and
-`Account Name` to track which account a statement came from. Transaction list and
-CSV export requests can filter by account with `account=Chase%20Checking`.
-The Account Summary panel and `GET /accounts/summary` endpoint break spending,
-income, net cash flow, and transaction counts down by account.
-Backend parser tests include reusable fixtures in
-`backend/tests/fixtures/statements` for Chase-style checking CSV, Amex-style card
-CSV, Capital One-style card CSV, a generic debit/credit bank CSV, mixed bad rows,
-and PDF-extracted statement text.
-Manual transactions can be added from the Transactions panel and are stored with
-`manual` as their source.
-Expense transactions can be split into multiple category allocations from the
-edit modal or split endpoints. Split lines must total the original expense and
-then drive category summaries, budgets, category filters, and deterministic
-category Q&A while the original transaction amount stays intact for account
-totals and CSV export.
+Reusable parser fixtures live in `backend/tests/fixtures/statements` and cover
+Chase-style checking CSV, Amex-style card CSV, Capital One-style card CSV,
+generic debit/credit bank CSV, mixed bad rows, and PDF-extracted statement text.
 
-Use `GET /data/export` or the dashboard Backup button to download a JSON snapshot
-of local finance data, including transaction splits, before clearing or moving
-development databases.
-Use the Privacy panel Restore control or `POST /data/import` with a backup JSON
-file and `confirmation=RESTORE` to replace local data from a backup.
-The dashboard Privacy panel can reset all local app records after typing `RESET`;
-the API requires the same confirmation with `DELETE /data?confirmation=RESET`.
-The Import Quality panel and `GET /imports/quality` summarize whether the current
-view has duplicate skips, category review work, active anomalies, or recurring
-patterns that should be understood before relying on the data.
+## Data And Privacy
 
-Recurring charge detection needs the same normalized merchant to appear across
-multiple months, so it becomes useful after importing a few statements. Upload
-`data/sample_recurring_transactions.csv` if you want demo recurring charges right away.
-Hide a recurring merchant from the dashboard or `POST /recurring/ignored` when a
-detected repeat charge should not affect forecasts or budget recommendations;
-restore it later with `DELETE /recurring/ignored/{id}`.
-Use the Bill Calendar panel or `GET /recurring/calendar` to see expected
-recurring charges by date; without a month it shows the month after the latest
-imported statement.
+- Data is local by default in SQLite.
+- `FINANCE_DB_PATH` can point the backend at another database file.
+- Backup exports include transactions, splits, uploads, budgets, merchant rules,
+  category review dismissals, CSV presets, recurring ignores, anomaly ignores,
+  and Q&A history.
+- Restore requires `RESTORE`; reset requires `RESET`.
+- Do not commit real bank statements, account numbers, or private financial
+  records.
 
-Dismiss an anomaly from the dashboard or `POST /anomalies/{id}/ignore` when a
-large expense is expected. Dismissed transactions are hidden from anomaly alerts,
-monthly insight anomaly counts, and anomaly Q&A until restored with
-`DELETE /anomalies/ignored/{id}`.
+## API Overview
 
-Monthly insight reports combine summary totals, budget progress, recurring charges,
-top merchants, largest expenses, and anomalies into a deterministic snapshot. Ask
-`Give me my monthly report for July 2026` to route the Q&A panel to that same report.
+Useful demo and import endpoints:
 
-Month-over-month comparisons show spending, income, net cash-flow, and category
-movement against the previous calendar month. Ask `How did August 2026 spending
-compare to the previous month?` to get the same comparison through the Q&A panel.
+```text
+POST /demo/sample-data
+POST /transactions/preview
+POST /transactions/preview/ai
+POST /transactions/import-reviewed
+POST /transactions/upload
+PUT  /csv-mapping-presets
+GET  /csv-mapping-presets
+DELETE /csv-mapping-presets/{id}
+```
 
-Cash-flow forecasts estimate month-end spending from imported activity and upcoming
-recurring charges. Ask `What am I projected to spend in August 2026?` to get the
-same forecast through the Q&A panel.
+Transactions, accounts, and exports:
 
-Budget recommendations use recent category spending and upcoming recurring charges
-to suggest starting targets. Ask `What budgets do you recommend for August 2026?`
-or apply a recommendation directly from the dashboard.
+```text
+GET    /transactions?month=2026-07&category=Dining&search=coffee
+POST   /transactions
+PATCH  /transactions/{id}
+PATCH  /transactions/{id}/category
+GET    /transactions/{id}/splits
+PUT    /transactions/{id}/splits
+DELETE /transactions/{id}/splits
+DELETE /transactions/{id}
+GET    /transactions/export?month=2026-07
+GET    /accounts
+GET    /accounts/summary?month=2026-07
+GET    /uploads
+GET    /data/export
+POST   /data/import
+DELETE /data?confirmation=RESET
+```
 
-Broad Q&A questions retrieve relevant transaction evidence and return citations in
-the answer card. Exact totals still come from deterministic database calculations.
-Recent Q&A exchanges are saved locally and included in full JSON backups.
-Clear follow-up questions such as `What about housing?` reuse the previous Q&A
-month when no new month is provided.
+Analytics and review:
 
-The category review queue surfaces uncertain imported categories and suggests a
-more likely category when the local classifier has enough signal. Preview rows
-and review items include confidence, source, matched merchant signals, and a short
-reason. Ask `Why was Trader Joes categorized as Food & Grocery in July 2026?` to
-get the same explanation through Q&A. Applying a suggestion can also save a
-merchant rule for future imports. Dismissing a suggestion teaches the local
-review queue to stop showing that merchant/current-category/suggested-category
-pair until it is restored.
-Merchant rules can also be created from the dashboard or `PUT /merchant-rules`;
-turn on `apply_existing` to recategorize matching transactions already in SQLite.
+```text
+GET  /summary?month=2026-07
+GET  /insights/monthly?month=2026-07
+GET  /comparisons/monthly?month=2026-08
+GET  /forecast/monthly?month=2026-08
+GET  /months
+GET  /imports/quality?month=2026-07
+GET  /categories?month=2026-07
+GET  /category-options
+GET  /categories/review?month=2026-07
+GET  /categories/review/ignored
+POST /categories/review/ai?month=2026-07
+GET  /ai/categorization/status
+GET  /trends
+GET  /merchants?month=2026-07
+GET  /expenses/largest?month=2026-07
+GET  /anomalies?month=2026-07
+GET  /recurring
+GET  /recurring/calendar?month=2026-08
+GET  /budgets?month=2026-07
+GET  /budgets/recommendations?month=2026-08
+POST /ask
+GET  /ask/history
+```
 
-AI Assist can optionally ask OpenAI for category suggestions for the current
-import preview or category review queue. Set `OPENAI_API_KEY` on the backend to
-enable it, and optionally override `OPENAI_CATEGORY_MODEL` from the default
-`gpt-5-nano`. The dashboard shows a warning and asks for confirmation before
-sending candidates to OpenAI. The sent fields are transaction descriptions,
-cleaned merchant names, dates, amounts, current categories, local suggestions,
-local reasons, and account labels. Preview suggestions update only unsaved
-preview rows; users still choose whether to import reviewed rows or apply
-category review changes.
+User preference endpoints:
 
-## Notes
-
-Use synthetic or exported demo data while developing. Do not commit real bank
-statements, account numbers, or private financial records.
+```text
+PUT    /merchant-rules
+GET    /merchant-rules
+DELETE /merchant-rules/{id}
+PUT    /budgets
+DELETE /budgets/{id}
+POST   /categories/review/{transaction_id}/ignore
+DELETE /categories/review/ignored/{ignore_id}
+POST   /recurring/ignored
+GET    /recurring/ignored
+DELETE /recurring/ignored/{id}
+POST   /anomalies/{id}/ignore
+GET    /anomalies/ignored
+DELETE /anomalies/ignored/{id}
+```
 
 ## Tests
 
-Run backend tests locally:
+Run backend tests:
 
-```bash
+```powershell
 cd backend
-python -m pytest
+..\.venv\Scripts\python.exe -m pytest
 ```
 
-Run the frontend production build locally:
+Run the frontend production build:
 
-```bash
+```powershell
 cd frontend
 npm run build
 ```
 
-Run the browser smoke test locally:
+Run the browser smoke test:
 
-```bash
+```powershell
 cd frontend
 npx playwright install chromium
 npm run test:e2e
 ```
 
-On Windows, set `NODE_OPTIONS=--use-system-ca` first if Playwright install hits
-the local certificate error noted above.
+The smoke test starts FastAPI and Vite against an isolated SQLite database, then
+drives the browser through import, reviewed rows, category review, splits,
+backup/restore, recurring controls, anomaly controls, and Q&A.
 
-GitHub Actions runs backend tests, the frontend production build, and the UI
-smoke test on pushes and pull requests.
+GitHub Actions runs:
+
+- Backend Tests
+- Frontend Build
+- UI Smoke Test
+
+## Project Structure
+
+```text
+smart-finance-tracker/
+|-- backend/
+|   |-- app/
+|   |   |-- ai_categorization.py
+|   |   |-- categorization.py
+|   |   |-- database.py
+|   |   `-- main.py
+|   |-- tests/
+|   |   |-- fixtures/
+|   |   `-- test_api.py
+|   |-- pytest.ini
+|   `-- requirements.txt
+|-- frontend/
+|   |-- src/
+|   |   |-- App.jsx
+|   |   |-- main.jsx
+|   |   `-- styles.css
+|   |-- tests/
+|   |-- index.html
+|   |-- package-lock.json
+|   |-- package.json
+|   `-- playwright.config.js
+|-- data/
+|   |-- sample_recurring_transactions.csv
+|   `-- sample_transactions.csv
+|-- docs/
+|   `-- architecture.md
+|-- .github/
+|   `-- workflows/
+|-- .env.example
+|-- .gitignore
+`-- README.md
+```
+
+## Architecture Notes
+
+SQLite schema upgrades are tracked with a `schema_migrations` ledger and
+`PRAGMA user_version`. The current baseline is
+`0001 current_local_finance_schema`.
+
+More implementation detail lives in [docs/architecture.md](docs/architecture.md).
+
+## Future Improvements
+
+- OCR for scanned PDF statements
+- Authentication and multi-user support
+- Encrypted local database option
+- Deeper embedding-based retrieval over notes and statement context
+- Deployment packaging and hosted demo environment
