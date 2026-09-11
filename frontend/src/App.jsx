@@ -48,6 +48,54 @@ const AI_CATEGORY_WARNING_TEXT = (
   "AI Assist sends transaction descriptions, cleaned merchant names, dates, amounts, current categories, local suggestions, local reasons, and account labels to OpenAI for category suggestions. It can update unsaved preview categories, but it never imports data or changes existing transactions automatically."
 );
 
+function statusMessageTone(message, busy) {
+  if (!message) {
+    return "neutral";
+  }
+
+  const normalized = message.toLowerCase();
+  if (busy || ["getting", "importing", "loading", "previewing"].some((term) => normalized.includes(term))) {
+    return "busy";
+  }
+
+  if ([
+    "choose",
+    "cannot",
+    "could not",
+    "enter",
+    "error",
+    "failed",
+    "invalid",
+    "must",
+    "not found",
+    "only expense",
+    "required",
+    "type ",
+  ].some((term) => normalized.includes(term))) {
+    return "error";
+  }
+
+  if ([
+    "added",
+    "cleared",
+    "deleted",
+    "dismissed",
+    "hid ",
+    "imported",
+    "loaded",
+    "previewed",
+    "removed",
+    "restored",
+    "saved",
+    "split ",
+    "updated",
+  ].some((term) => normalized.includes(term))) {
+    return "success";
+  }
+
+  return "neutral";
+}
+
 export default function App() {
   const [health, setHealth] = useState("Checking");
   const [summary, setSummary] = useState(emptySummary());
@@ -114,6 +162,7 @@ export default function App() {
     || ignoredAnomalies.length
     || askHistory.length
   );
+  const statusFeedbackTone = statusMessageTone(uploadStatus, busy);
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -1072,6 +1121,18 @@ export default function App() {
         </div>
       </header>
 
+      {uploadStatus && (
+        <div
+          aria-live={statusFeedbackTone === "error" ? "assertive" : "polite"}
+          className={`feedback-strip feedback-${statusFeedbackTone}`}
+          data-testid="status-message"
+          role={statusFeedbackTone === "error" ? "alert" : "status"}
+        >
+          <span aria-hidden="true" className="feedback-dot" />
+          <p>{uploadStatus}</p>
+        </div>
+      )}
+
       <section className="metrics-grid" aria-label="Finance metrics">
         <Metric label="Spending" value={money(summary.total_spending)} tone="spend" />
         <Metric label="Income" value={money(summary.total_income)} tone="income" />
@@ -1230,7 +1291,6 @@ export default function App() {
               </button>
             </div>
           </form>
-          {uploadStatus && <p className="helper-text" data-testid="status-message">{uploadStatus}</p>}
           <CsvPresetForm
             busy={busy}
             draft={csvPresetDraft}

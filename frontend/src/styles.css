@@ -168,6 +168,60 @@ h2 {
   color: var(--bad);
 }
 
+.feedback-strip {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin: -4px 0 16px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+}
+
+.feedback-strip p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.feedback-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  background: var(--blue);
+}
+
+.feedback-success {
+  border-color: rgba(33, 115, 70, 0.28);
+  background: #eef8f2;
+}
+
+.feedback-success .feedback-dot {
+  background: var(--good);
+}
+
+.feedback-error {
+  border-color: rgba(180, 35, 24, 0.3);
+  background: #fff2f0;
+}
+
+.feedback-error .feedback-dot {
+  background: var(--bad);
+}
+
+.feedback-busy {
+  border-color: rgba(164, 95, 32, 0.32);
+  background: #fff7ed;
+}
+
+.feedback-busy .feedback-dot {
+  background: var(--warn);
+}
+
 .icon-button {
   display: inline-grid;
   place-items: center;
