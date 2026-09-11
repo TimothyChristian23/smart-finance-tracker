@@ -54,7 +54,7 @@ function statusMessageTone(message, busy) {
   }
 
   const normalized = message.toLowerCase();
-  if (busy || ["getting", "importing", "loading", "previewing"].some((term) => normalized.includes(term))) {
+  if (busy || ["downloading", "getting", "importing", "loading", "preparing", "previewing"].some((term) => normalized.includes(term))) {
     return "busy";
   }
 
@@ -1095,10 +1095,12 @@ export default function App() {
       search: transactionFilters.search,
       limit: 5000,
     });
+    setUploadStatus("Downloading transaction CSV export...");
     window.location.assign(`${API_BASE}/transactions/export${params}`);
   }
 
   function handleExportBackup() {
+    setUploadStatus("Preparing backup download...");
     window.location.assign(`${API_BASE}/data/export`);
   }
 
@@ -1297,14 +1299,23 @@ export default function App() {
         <section className="panel action-panel" data-testid="import-panel" ref={importPanelRef}>
           <PanelTitle icon={<FileUp size={18} />} title="Import Statement" detail="CSV/PDF" />
           <form className="upload-form" onSubmit={handleUpload}>
-            <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={clearPreviewState} />
-            <input name="accountName" type="text" maxLength={80} placeholder="Account label" onChange={clearPreviewState} />
-            <select name="csvPresetId" aria-label="CSV mapping preset" onChange={clearPreviewState}>
-              <option value="">Auto mapping</option>
-              {csvPresets.map((preset) => (
-                <option key={preset.id} value={preset.id}>{preset.name}</option>
-              ))}
-            </select>
+            <label className="form-field">
+              <span>Statement file</span>
+              <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={clearPreviewState} />
+            </label>
+            <label className="form-field">
+              <span>Account label</span>
+              <input name="accountName" type="text" maxLength={80} placeholder="Checking, credit card, or bank name" onChange={clearPreviewState} />
+            </label>
+            <label className="form-field">
+              <span>CSV mapping preset</span>
+              <select name="csvPresetId" onChange={clearPreviewState}>
+                <option value="">Auto mapping</option>
+                {csvPresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>{preset.name}</option>
+                ))}
+              </select>
+            </label>
             <div className="button-row">
               <button className="ghost-button" type="button" disabled={busy} onClick={handlePreviewUpload}>
                 <Eye size={16} />
@@ -1368,27 +1379,34 @@ export default function App() {
         <section className="panel privacy-panel" data-testid="privacy-panel">
           <PanelTitle icon={<Shield size={18} />} title="Privacy" detail="Local data" />
           <form className="privacy-form" onSubmit={handleResetLocalData}>
-            <input
-              aria-label="Reset confirmation"
-              autoComplete="off"
-              onChange={(event) => setResetConfirmation(event.target.value)}
-              placeholder="RESET"
-              value={resetConfirmation}
-            />
+            <label className="form-field">
+              <span>Reset confirmation</span>
+              <input
+                autoComplete="off"
+                onChange={(event) => setResetConfirmation(event.target.value)}
+                placeholder="RESET"
+                value={resetConfirmation}
+              />
+            </label>
             <button className="danger-action" type="submit" disabled={busy || !hasLocalData || resetConfirmation !== "RESET"}>
               <Trash2 size={16} />
               Reset Data
             </button>
           </form>
           <form className="privacy-form restore-form" onSubmit={handleRestoreBackup}>
-            <input name="backup" type="file" accept=".json,application/json" />
-            <input
-              aria-label="Restore confirmation"
-              autoComplete="off"
-              onChange={(event) => setRestoreConfirmation(event.target.value)}
-              placeholder="RESTORE"
-              value={restoreConfirmation}
-            />
+            <label className="form-field">
+              <span>Backup file</span>
+              <input name="backup" type="file" accept=".json,application/json" />
+            </label>
+            <label className="form-field">
+              <span>Restore confirmation</span>
+              <input
+                autoComplete="off"
+                onChange={(event) => setRestoreConfirmation(event.target.value)}
+                placeholder="RESTORE"
+                value={restoreConfirmation}
+              />
+            </label>
             <button type="submit" disabled={busy || restoreConfirmation !== "RESTORE"}>
               <FileUp size={16} />
               Restore
@@ -1399,7 +1417,10 @@ export default function App() {
         <section className="panel ask-panel" data-testid="ask-panel" ref={askPanelRef}>
           <PanelTitle icon={<MessageSquare size={18} />} title="Ask About Spending" detail={selectedMonthLabel} />
           <form className="ask-form" onSubmit={handleAsk}>
-            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={3} />
+            <label className="form-field">
+              <span>Question</span>
+              <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={3} />
+            </label>
             <button type="submit" disabled={busy}>Ask</button>
           </form>
           {answer && <AnswerCard answer={answer} />}
