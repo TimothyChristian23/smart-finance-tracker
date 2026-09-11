@@ -96,6 +96,18 @@ function statusMessageTone(message, busy) {
   return "neutral";
 }
 
+function healthStatusClass(health) {
+  if (health === "Online") {
+    return "status-online";
+  }
+
+  if (health === "Checking") {
+    return "status-checking";
+  }
+
+  return "status-offline";
+}
+
 export default function App() {
   const [health, setHealth] = useState("Checking");
   const [summary, setSummary] = useState(emptySummary());
@@ -143,6 +155,7 @@ export default function App() {
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [editDraft, setEditDraft] = useState(emptyTransactionDraft());
   const [busy, setBusy] = useState(false);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
   const [updatingTransactionId, setUpdatingTransactionId] = useState(null);
   const [deletingTransactionId, setDeletingTransactionId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState("");
@@ -163,8 +176,11 @@ export default function App() {
     || askHistory.length
   );
   const statusFeedbackTone = statusMessageTone(uploadStatus, busy);
+  const isInitialDashboardLoad = dashboardLoading && !lastUpdated;
 
   const refreshDashboard = useCallback(async () => {
+    setDashboardLoading(true);
+
     try {
       const healthPayload = await request("/health");
       setHealth(healthPayload.status === "ok" ? "Online" : "Offline");
@@ -271,6 +287,8 @@ export default function App() {
     } catch (error) {
       setHealth("Offline");
       setUploadStatus(error.message);
+    } finally {
+      setDashboardLoading(false);
     }
   }, [month, transactionFilters]);
 
@@ -1099,7 +1117,7 @@ export default function App() {
   const trendDomain = useMemo(() => [0, "auto"], []);
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" aria-busy={dashboardLoading}>
       <header className="topbar">
         <div>
           <p className="eyebrow">Finance assistant</p>
@@ -1114,8 +1132,15 @@ export default function App() {
               <option value={item.month} key={item.month}>{item.month}</option>
             ))}
           </select>
-          <span className={`status ${health === "Online" ? "status-online" : "status-offline"}`}>{health}</span>
-          <button className="icon-button" type="button" onClick={refreshDashboard} aria-label="Refresh dashboard" title="Refresh dashboard">
+          <span className={`status ${healthStatusClass(health)}`}>{health}</span>
+          <button
+            className={`icon-button ${dashboardLoading ? "is-refreshing" : ""}`}
+            type="button"
+            disabled={dashboardLoading || busy}
+            onClick={refreshDashboard}
+            aria-label="Refresh dashboard"
+            title="Refresh dashboard"
+          >
             <RefreshCw size={18} />
           </button>
         </div>
@@ -1133,14 +1158,25 @@ export default function App() {
         </div>
       )}
 
-      <section className="metrics-grid" aria-label="Finance metrics">
-        <Metric label="Spending" value={money(summary.total_spending)} tone="spend" />
-        <Metric label="Income" value={money(summary.total_income)} tone="income" />
-        <Metric label="Net" value={money(summary.net)} tone={summary.net >= 0 ? "income" : "spend"} />
-        <Metric label="Transactions" value={summary.transaction_count} />
-      </section>
+      {isInitialDashboardLoad ? (
+        <>
+          <section className="metrics-grid" aria-label="Finance metrics loading">
+            {["Spending", "Income", "Net", "Transactions"].map((label) => (
+              <MetricSkeleton key={label} label={label} />
+            ))}
+          </section>
+          <DashboardLoadingPanel />
+        </>
+      ) : (
+        <section className="metrics-grid" aria-label="Finance metrics">
+          <Metric label="Spending" value={money(summary.total_spending)} tone="spend" />
+          <Metric label="Income" value={money(summary.total_income)} tone="income" />
+          <Metric label="Net" value={money(summary.net)} tone={summary.net >= 0 ? "income" : "spend"} />
+          <Metric label="Transactions" value={summary.transaction_count} />
+        </section>
+      )}
 
-      {!hasTransactions && (
+      {!isInitialDashboardLoad && !hasTransactions && (
         <section className="panel starter-panel" data-testid="starter-panel">
           <PanelTitle icon={<Sparkles size={18} />} title="No Transactions Yet" detail="First run" />
           <div className="starter-actions">
@@ -1160,7 +1196,7 @@ export default function App() {
         </section>
       )}
 
-      <section className="dashboard-grid">
+      <section className={`dashboard-grid ${isInitialDashboardLoad ? "is-loading-dashboard" : ""}`}>
         <section className="panel chart-panel">
           <PanelTitle icon={<BarChart3 size={18} />} title="Category Spend" detail={selectedMonthLabel} />
           <ChartFrame empty={!categories.length} emptyText="No category totals yet.">
@@ -1404,7 +1440,7 @@ export default function App() {
         </section>
       </section>
 
-      <section className="panel transactions-panel" data-testid="transactions-panel">
+      <section className={`panel transactions-panel ${isInitialDashboardLoad ? "is-loading-dashboard" : ""}`} data-testid="transactions-panel">
         <PanelTitle
           icon={<CircleDollarSign size={18} />}
           title="Transactions"
@@ -1478,6 +1514,27 @@ function Metric({ label, value, tone = "neutral" }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </article>
+  );
+}
+
+function MetricSkeleton({ label }) {
+  return (
+    <article className="metric metric-loading">
+      <span>{label}</span>
+      <span className="metric-loading-value" aria-hidden="true" />
+    </article>
+  );
+}
+
+function DashboardLoadingPanel() {
+  return (
+    <section className="panel loading-panel" role="status" aria-live="polite" data-testid="dashboard-loading">
+      <PanelTitle icon={<RefreshCw size={18} />} title="Loading Dashboard" detail="Connecting" />
+      <div className="loading-lines" aria-hidden="true">
+        <span className="loading-line" />
+        <span className="loading-line loading-line-short" />
+      </div>
+    </section>
   );
 }
 

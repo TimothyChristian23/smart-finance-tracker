@@ -51,6 +51,22 @@ button:disabled {
   opacity: 0.58;
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -120% 0;
+  }
+}
+
 .app-shell {
   width: min(1280px, calc(100% - 32px));
   margin: 16px auto 28px;
@@ -168,6 +184,12 @@ h2 {
   color: var(--bad);
 }
 
+.status-checking {
+  border-color: rgba(49, 95, 159, 0.28);
+  background: #eef4fb;
+  color: var(--blue);
+}
+
 .feedback-strip {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr);
@@ -232,6 +254,10 @@ h2 {
   color: var(--ink);
 }
 
+.icon-button.is-refreshing svg {
+  animation: spin 0.85s linear infinite;
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -276,6 +302,45 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.metric-loading {
+  border-top-color: rgba(49, 95, 159, 0.32);
+}
+
+.metric-loading-value,
+.loading-line {
+  display: block;
+  background: linear-gradient(90deg, #e7edf3 0%, #f8fafc 48%, #e7edf3 100%);
+  background-size: 220% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+
+.metric-loading-value {
+  width: min(78%, 170px);
+  height: 28px;
+  margin-top: 15px;
+}
+
+.loading-panel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  border-left: 4px solid var(--blue);
+}
+
+.loading-lines {
+  display: grid;
+  gap: 9px;
+}
+
+.loading-line {
+  width: 100%;
+  height: 10px;
+}
+
+.loading-line-short {
+  width: min(64%, 420px);
+}
+
 .starter-panel {
   display: grid;
   gap: 12px;
@@ -314,6 +379,10 @@ h2 {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.8fr) minmax(280px, 0.8fr);
   gap: 16px;
+}
+
+.is-loading-dashboard {
+  display: none;
 }
 
 .panel {
