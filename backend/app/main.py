@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -90,11 +91,25 @@ from app.database import (
     update_transaction_details,
 )
 
+DEFAULT_FRONTEND_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+
+
+def configured_frontend_origins() -> list[str]:
+    raw_origins = os.getenv("FRONTEND_ORIGINS") or os.getenv("FRONTEND_ORIGIN", "")
+    origins = []
+    for origin in raw_origins.split(","):
+        normalized = origin.strip().rstrip("/")
+        if normalized:
+            origins.append(normalized)
+
+    return origins or list(DEFAULT_FRONTEND_ORIGINS)
+
+
 app = FastAPI(title="Smart Personal Finance Tracker API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=configured_frontend_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

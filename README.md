@@ -112,6 +112,14 @@ $env:NODE_OPTIONS="--use-system-ca"
 npm.cmd install
 ```
 
+## Deployment Prep
+
+See [docs/deployment.md](docs/deployment.md) for hosting notes. In production,
+set `FRONTEND_ORIGIN` on the backend to the deployed frontend URL and
+`VITE_API_BASE_URL` on the frontend build to the deployed backend URL. Use a
+persistent volume for SQLite so uploads, transactions, preferences, and history
+survive service restarts.
+
 ## Optional AI Assist
 
 AI Assist is disabled unless `OPENAI_API_KEY` is configured on the backend.
@@ -331,7 +339,8 @@ smart-finance-tracker/
 |   `-- sample_transactions.csv
 |-- docs/
 |   |-- screenshots/
-|   `-- architecture.md
+|   |-- architecture.md
+|   `-- deployment.md
 |-- .github/
 |   `-- workflows/
 |-- .env.example
@@ -353,4 +362,4 @@ More implementation detail lives in [docs/architecture.md](docs/architecture.md)
 - Authentication and multi-user support
 - Encrypted local database option
 - Deeper embedding-based retrieval over notes and statement context
-- Deployment packaging and hosted demo environment
+- Hosted demo environment with auth and seeded read-only data

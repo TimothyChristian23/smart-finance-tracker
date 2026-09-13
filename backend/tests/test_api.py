@@ -9,7 +9,13 @@ from fastapi.testclient import TestClient
 from app import ai_categorization
 from app.categorization import clean_merchant_description, merchant_key
 from app.database import connect, reset_db
-from app.main import app, infer_month, money_to_cents, parse_transactions_csv
+from app.main import (
+    app,
+    configured_frontend_origins,
+    infer_month,
+    money_to_cents,
+    parse_transactions_csv,
+)
 
 client = TestClient(app)
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "statements"
@@ -99,6 +105,35 @@ def test_health():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_configured_frontend_origins_defaults(monkeypatch):
+    monkeypatch.delenv("FRONTEND_ORIGINS", raising=False)
+    monkeypatch.delenv("FRONTEND_ORIGIN", raising=False)
+
+    assert configured_frontend_origins() == [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+
+def test_configured_frontend_origins_accepts_comma_separated_values(monkeypatch):
+    monkeypatch.setenv(
+        "FRONTEND_ORIGIN",
+        "https://finance.example.com, http://localhost:5173/, ,",
+    )
+
+    assert configured_frontend_origins() == [
+        "https://finance.example.com",
+        "http://localhost:5173",
+    ]
+
+
+def test_configured_frontend_origins_prefers_plural_variable(monkeypatch):
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://ignored.example.com")
+    monkeypatch.setenv("FRONTEND_ORIGINS", "https://app.example.com")
+
+    assert configured_frontend_origins() == ["https://app.example.com"]
 
 
 def test_demo_sample_data_imports_bundled_statements_and_skips_repeats():

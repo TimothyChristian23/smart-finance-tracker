@@ -1,4 +1,6 @@
 .env
+frontend/.env.local
+frontend/.env.*.local
 .pytest_cache/
 .pytest_tmp/
 __pycache__/
