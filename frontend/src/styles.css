@@ -486,10 +486,31 @@ h2 {
   width: 100%;
 }
 
+.form-field input[type="file"] {
+  padding: 0;
+  color: var(--muted);
+}
+
+.form-field input[type="file"]::file-selector-button {
+  min-height: 40px;
+  margin: 0 10px 0 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: #f8fafb;
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 850;
+  padding: 0 12px;
+}
+
 .upload-form input,
 .upload-form select {
   min-height: 42px;
   padding: 8px;
+}
+
+.upload-form input[type="file"] {
+  padding: 0;
 }
 
 .budget-form select,
@@ -1747,13 +1768,20 @@ h2 {
 
 .transaction-table {
   display: grid;
-  grid-template-columns: 120px minmax(220px, 1fr) 230px 120px 86px;
   gap: 0;
   margin-top: 12px;
   overflow-x: auto;
 }
 
-.transaction-table > div {
+.transaction-table-header,
+.transaction-row {
+  display: grid;
+  grid-template-columns: 120px minmax(220px, 1fr) 230px 120px 86px;
+  min-width: 720px;
+}
+
+.transaction-table-header > div,
+.transaction-row > div {
   min-height: 42px;
   border-top: 1px solid var(--line);
   padding: 10px;
@@ -2144,6 +2172,73 @@ h2 {
     justify-content: flex-start;
   }
 
+  .transaction-table {
+    gap: 10px;
+    overflow-x: visible;
+  }
+
+  .transaction-table-header {
+    display: none;
+  }
+
+  .transaction-row {
+    grid-template-columns: 1fr;
+    min-width: 0;
+    border: 1px solid var(--line);
+    background: #fff;
+    padding: 12px;
+  }
+
+  .transaction-row > div {
+    min-height: 0;
+    border-top: 0;
+    padding: 0;
+  }
+
+  .transaction-date {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .transaction-category-cell {
+    display: grid;
+    gap: 6px;
+  }
+
+  .transaction-category-cell::before,
+  .transaction-amount-cell::before {
+    color: var(--muted);
+    content: "Category";
+    font-size: 0.74rem;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .transaction-amount-cell {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--line) !important;
+    padding-top: 9px !important;
+    text-align: left;
+  }
+
+  .transaction-amount-cell::before {
+    content: "Amount";
+  }
+
+  .transaction-actions {
+    justify-content: flex-start;
+    border-top: 1px solid var(--line) !important;
+    padding-top: 9px !important;
+  }
+
+  .category-editor {
+    max-width: none;
+  }
+
   .budget-form,
   .csv-preset-form,
   .rule-form {
@@ -2231,10 +2326,6 @@ h2 {
 
   .filter-reset {
     width: 100%;
-  }
-
-  .transaction-table {
-    grid-template-columns: 110px 200px 220px 105px 86px;
   }
 
   .transaction-edit-form {

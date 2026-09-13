@@ -1479,11 +1479,13 @@ export default function App() {
           total={transactions.length}
         />
         <div className="transaction-table">
-          <div className="table-heading">Date</div>
-          <div className="table-heading">Description</div>
-          <div className="table-heading">Category</div>
-          <div className="table-heading align-right">Amount</div>
-          <div className="table-heading align-center">Actions</div>
+          <div className="transaction-table-header">
+            <div className="table-heading">Date</div>
+            <div className="table-heading">Description</div>
+            <div className="table-heading">Category</div>
+            <div className="table-heading align-right">Amount</div>
+            <div className="table-heading align-center">Actions</div>
+          </div>
           {visibleTransactions.map((transaction) => (
             <TransactionRow
               categoryOptions={categoryOptions}
@@ -2561,14 +2563,14 @@ function TransactionRow({ categoryOptions, deleting, onCategoryChange, onDelete,
   const actionsDisabled = deleting || updating;
 
   return (
-    <>
-      <div>{transaction.date}</div>
+    <div className="transaction-row">
+      <div className="transaction-date">{transaction.date}</div>
       <div className="transaction-description">
         <strong>{transaction.description}</strong>
         <span>{sourceLabel}</span>
         {transaction.is_split && <small>{splitSummary(transaction)}</small>}
       </div>
-      <div>
+      <div className="transaction-category-cell">
         <CategoryEditor
           options={categoryOptions}
           onCategoryChange={onCategoryChange}
@@ -2576,7 +2578,7 @@ function TransactionRow({ categoryOptions, deleting, onCategoryChange, onDelete,
           updating={updating}
         />
       </div>
-      <div className={`align-right ${transaction.amount < 0 ? "negative" : "positive"}`}>
+      <div className={`transaction-amount-cell align-right ${transaction.amount < 0 ? "negative" : "positive"}`}>
         {money(transaction.amount)}
       </div>
       <div className="align-center transaction-actions">
@@ -2601,7 +2603,7 @@ function TransactionRow({ categoryOptions, deleting, onCategoryChange, onDelete,
           <Trash2 size={15} />
         </button>
       </div>
-    </>
+    </div>
   );
 }
 

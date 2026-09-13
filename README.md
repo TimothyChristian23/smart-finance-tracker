@@ -258,6 +258,17 @@ cd frontend
 npm run build
 ```
 
+Capture desktop/mobile visual QA screenshots and overflow checks:
+
+```powershell
+cd frontend
+$env:VISUAL_QA_LOAD_SAMPLES="true"
+npm run visual:qa
+```
+
+Use a disposable `FINANCE_DB_PATH` on the backend when loading samples for
+visual QA.
+
 Run the browser smoke test:
 
 ```powershell

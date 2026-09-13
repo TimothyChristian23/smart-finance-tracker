@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "visual:qa": "node scripts/visual-qa.cjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
