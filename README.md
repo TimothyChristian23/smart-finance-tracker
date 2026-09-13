@@ -60,6 +60,18 @@ data/sample_transactions.csv
 data/sample_recurring_transactions.csv
 ```
 
+## Screenshots
+
+Desktop dashboard with sample data:
+
+![Smart Personal Finance Tracker desktop dashboard](docs/screenshots/dashboard-desktop.png)
+
+Mobile dashboard and transaction review:
+
+| Dashboard | Transactions |
+| --- | --- |
+| ![Mobile dashboard](docs/screenshots/dashboard-mobile.png) | ![Mobile transaction cards](docs/screenshots/transactions-mobile.png) |
+
 ## Run Locally
 
 Create and run the backend:
@@ -263,6 +275,7 @@ Capture desktop/mobile visual QA screenshots and overflow checks:
 ```powershell
 cd frontend
 $env:VISUAL_QA_LOAD_SAMPLES="true"
+$env:VISUAL_QA_DIR="..\docs\screenshots"
 npm run visual:qa
 ```
 
@@ -303,6 +316,7 @@ smart-finance-tracker/
 |   |-- pytest.ini
 |   `-- requirements.txt
 |-- frontend/
+|   |-- scripts/
 |   |-- src/
 |   |   |-- App.jsx
 |   |   |-- main.jsx
@@ -316,6 +330,7 @@ smart-finance-tracker/
 |   |-- sample_recurring_transactions.csv
 |   `-- sample_transactions.csv
 |-- docs/
+|   |-- screenshots/
 |   `-- architecture.md
 |-- .github/
 |   `-- workflows/
