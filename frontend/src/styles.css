@@ -240,6 +240,38 @@ h2 {
   background: #fff7ed;
 }
 
+.demo-mode-strip {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin: -4px 0 16px;
+  border: 1px solid rgba(49, 95, 159, 0.3);
+  background: #eef4fb;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  padding: 11px 12px;
+}
+
+.demo-mode-strip svg {
+  color: var(--blue);
+  margin-top: 2px;
+}
+
+.demo-mode-strip strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 0.88rem;
+}
+
+.demo-mode-strip p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.42;
+}
+
 .feedback-busy .feedback-dot {
   background: var(--warn);
 }

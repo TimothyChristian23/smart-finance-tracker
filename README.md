@@ -25,6 +25,7 @@ categories after explicit user confirmation.
 - Monthly insights, month-over-month comparison, and cash-flow forecast
 - Deterministic Q&A with citations and local Q&A history
 - Full local JSON backup, guarded restore, and typed reset
+- Demo mode for public showcase deployments without mutation/export access
 - Backend, frontend, and browser smoke-test GitHub Actions
 
 ## Tech Stack
@@ -119,6 +120,10 @@ set `FRONTEND_ORIGIN` on the backend to the deployed frontend URL and
 `VITE_API_BASE_URL` on the frontend build to the deployed backend URL. Use a
 persistent volume for SQLite so uploads, transactions, preferences, and history
 survive service restarts.
+
+For a public portfolio demo without authentication, set `DEMO_MODE=true`. Demo
+mode allows loading bundled synthetic samples and asking questions, while
+blocking uploads, imports, exports, resets, AI Assist, and saved changes.
 
 ## Optional AI Assist
 
@@ -302,6 +307,14 @@ The smoke test starts FastAPI and Vite against an isolated SQLite database, then
 drives the browser through import, reviewed rows, category review, splits,
 backup/restore, recurring controls, anomaly controls, and Q&A.
 
+Run the Docker demo profile:
+
+```powershell
+docker compose -f docker-compose.demo.yml up --build
+```
+
+Open `http://localhost:8080`, then use `Load Samples`.
+
 GitHub Actions runs:
 
 - Backend Tests
@@ -322,6 +335,7 @@ smart-finance-tracker/
 |   |   |-- fixtures/
 |   |   `-- test_api.py
 |   |-- pytest.ini
+|   |-- Dockerfile
 |   `-- requirements.txt
 |-- frontend/
 |   |-- scripts/
@@ -331,6 +345,8 @@ smart-finance-tracker/
 |   |   `-- styles.css
 |   |-- tests/
 |   |-- index.html
+|   |-- Dockerfile
+|   |-- nginx.conf
 |   |-- package-lock.json
 |   |-- package.json
 |   `-- playwright.config.js
@@ -343,6 +359,8 @@ smart-finance-tracker/
 |   `-- deployment.md
 |-- .github/
 |   `-- workflows/
+|-- docker-compose.demo.yml
+|-- .dockerignore
 |-- .env.example
 |-- .gitignore
 `-- README.md

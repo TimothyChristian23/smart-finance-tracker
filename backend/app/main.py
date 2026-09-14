@@ -10,8 +10,9 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO, StringIO
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
@@ -92,6 +93,19 @@ from app.database import (
 )
 
 DEFAULT_FRONTEND_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+DEMO_MODE_MESSAGE = (
+    "Demo mode is read-only for public safety. Load Samples and Ask are available, "
+    "but uploads, imports, exports, resets, AI Assist, and saved changes are disabled."
+)
+DEMO_MODE_ALLOWED_WRITE_REQUESTS = {
+    ("POST", "/demo/sample-data"),
+    ("POST", "/ask"),
+}
+DEMO_MODE_BLOCKED_GET_PATHS = {
+    "/data/export",
+    "/transactions/export",
+}
 
 
 def configured_frontend_origins() -> list[str]:
@@ -105,6 +119,45 @@ def configured_frontend_origins() -> list[str]:
     return origins or list(DEFAULT_FRONTEND_ORIGINS)
 
 
+def demo_mode_enabled() -> bool:
+    return os.getenv("DEMO_MODE", "").strip().lower() in TRUTHY_ENV_VALUES
+
+
+def configured_demo_data_dir() -> Path:
+    raw_path = os.getenv("DEMO_DATA_DIR")
+    if not raw_path:
+        return Path(__file__).resolve().parents[2] / "data"
+
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return path
+
+    return Path(__file__).resolve().parents[2] / path
+
+
+def request_blocked_by_demo_mode(method: str, path: str) -> bool:
+    normalized_method = method.upper()
+    request_key = (normalized_method, path)
+    if request_key in DEMO_MODE_ALLOWED_WRITE_REQUESTS:
+        return False
+
+    if normalized_method in {"POST", "PUT", "PATCH", "DELETE"}:
+        return True
+
+    return normalized_method == "GET" and path in DEMO_MODE_BLOCKED_GET_PATHS
+
+
+def demo_mode_forbidden_response(origin: str | None = None) -> JSONResponse:
+    response = JSONResponse(status_code=403, content={"detail": DEMO_MODE_MESSAGE})
+    if origin:
+        normalized_origin = origin.strip().rstrip("/")
+        if normalized_origin in configured_frontend_origins():
+            response.headers["Access-Control-Allow-Origin"] = normalized_origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Vary"] = "Origin"
+    return response
+
+
 app = FastAPI(title="Smart Personal Finance Tracker API", version="0.1.0")
 
 app.add_middleware(
@@ -114,6 +167,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def enforce_demo_mode(request: Request, call_next):
+    if demo_mode_enabled() and request_blocked_by_demo_mode(request.method, request.url.path):
+        return demo_mode_forbidden_response(request.headers.get("origin"))
+    return await call_next(request)
+
+
+class RuntimeConfigResponse(BaseModel):
+    demo_mode: bool
+    demo_mode_message: str | None = None
 
 
 class UploadResponse(BaseModel):
@@ -742,7 +807,7 @@ AI_CATEGORY_WARNING = (
     "to OpenAI for category suggestions. It can update unsaved preview categories, "
     "but it never imports data or changes existing transactions automatically."
 )
-DEMO_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DEMO_DATA_DIR = configured_demo_data_dir()
 DEMO_SAMPLE_STATEMENTS = [
     {"filename": "sample_transactions.csv", "account_name": "Demo Checking"},
     {"filename": "sample_recurring_transactions.csv", "account_name": "Demo Recurring"},
@@ -754,9 +819,20 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/runtime-config", response_model=RuntimeConfigResponse)
+async def runtime_config() -> dict:
+    enabled = demo_mode_enabled()
+    return {
+        "demo_mode": enabled,
+        "demo_mode_message": DEMO_MODE_MESSAGE if enabled else None,
+    }
+
+
 @app.post("/demo/sample-data", response_model=DemoSampleDataResponse)
 async def load_demo_sample_data() -> dict:
     """Load bundled synthetic sample statements for a quick local demo."""
+    if demo_mode_enabled():
+        reset_all_data()
     return import_demo_sample_data()
 
 
@@ -1262,14 +1338,15 @@ async def ask(request: AskRequest) -> AskResponse:
         raise HTTPException(status_code=400, detail="question cannot be empty.")
 
     response = answer_finance_question(question)
-    record_ask_history(
-        question=question,
-        answer=response.answer,
-        amount=response.amount,
-        categories=response.categories,
-        month=response.month,
-        intent=response.intent,
-    )
+    if not demo_mode_enabled():
+        record_ask_history(
+            question=question,
+            answer=response.answer,
+            amount=response.amount,
+            categories=response.categories,
+            month=response.month,
+            intent=response.intent,
+        )
     return response
 
 

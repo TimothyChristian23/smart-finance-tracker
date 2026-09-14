@@ -11,10 +11,13 @@ from app.categorization import clean_merchant_description, merchant_key
 from app.database import connect, reset_db
 from app.main import (
     app,
+    configured_demo_data_dir,
     configured_frontend_origins,
+    demo_mode_enabled,
     infer_month,
     money_to_cents,
     parse_transactions_csv,
+    request_blocked_by_demo_mode,
 )
 
 client = TestClient(app)
@@ -76,6 +79,7 @@ def isolated_db(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_CATEGORY_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("DEMO_MODE", raising=False)
     reset_db()
 
 
@@ -134,6 +138,78 @@ def test_configured_frontend_origins_prefers_plural_variable(monkeypatch):
     monkeypatch.setenv("FRONTEND_ORIGINS", "https://app.example.com")
 
     assert configured_frontend_origins() == ["https://app.example.com"]
+
+
+def test_demo_mode_helpers(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "yes")
+
+    assert demo_mode_enabled() is True
+    assert request_blocked_by_demo_mode("POST", "/transactions")
+    assert request_blocked_by_demo_mode("GET", "/data/export")
+    assert not request_blocked_by_demo_mode("POST", "/demo/sample-data")
+    assert not request_blocked_by_demo_mode("POST", "/ask")
+
+
+def test_configured_demo_data_dir_resolves_relative_to_repo_root(monkeypatch):
+    monkeypatch.setenv("DEMO_DATA_DIR", "sample-data")
+
+    assert configured_demo_data_dir() == Path(__file__).resolve().parents[2] / "sample-data"
+
+
+def test_runtime_config_reports_demo_mode(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+
+    response = client.get("/runtime-config")
+
+    assert response.status_code == 200
+    assert response.json()["demo_mode"] is True
+    assert "read-only" in response.json()["demo_mode_message"]
+
+
+def test_demo_mode_blocks_mutating_routes(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+
+    response = client.post("/transactions", json={"description": "Blocked"})
+
+    assert response.status_code == 403
+    assert "Demo mode" in response.json()["detail"]
+
+
+def test_demo_mode_blocks_exports_with_cors_headers(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+
+    response = client.get("/data/export", headers={"Origin": "http://localhost:5173"})
+
+    assert response.status_code == 403
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_demo_mode_sample_data_resets_before_loading(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+
+    first = client.post("/demo/sample-data")
+    second = client.post("/demo/sample-data")
+    uploads_response = client.get("/uploads")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["imported"] == 52
+    assert second.json()["imported"] == 52
+    assert second.json()["duplicates_skipped"] == 0
+    assert len(uploads_response.json()) == 2
+
+
+def test_demo_mode_ask_does_not_record_history(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    client.post("/demo/sample-data")
+
+    response = client.post("/ask", json={"question": "How much did I spend on food in July 2026?"})
+    history_response = client.get("/ask/history")
+
+    assert response.status_code == 200
+    assert history_response.status_code == 200
+    assert history_response.json() == []
 
 
 def test_demo_sample_data_imports_bundled_statements_and_skips_repeats():

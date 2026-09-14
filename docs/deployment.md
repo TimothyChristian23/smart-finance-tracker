@@ -8,6 +8,44 @@ The app is easiest to host as two services:
 Keep real financial data out of the repo. For a public demo, use the bundled
 synthetic sample data or a disposable database.
 
+## Demo Mode
+
+Set `DEMO_MODE=true` for public demos without authentication. Demo mode allows
+`Load Samples` and Q&A, but blocks uploads, imports, exports, resets, AI Assist,
+and saved changes. Each `Load Samples` request resets the demo database back to
+the bundled synthetic statements.
+
+```env
+DEMO_MODE=true
+DEMO_DATA_DIR=/app/data
+```
+
+Do not use demo mode as authentication. It is a public showcase profile, not a
+private finance deployment.
+
+## Docker Demo
+
+Run the demo profile locally:
+
+```bash
+docker compose -f docker-compose.demo.yml up --build
+```
+
+Then open:
+
+```text
+http://localhost:8080
+```
+
+The compose profile builds:
+
+- `backend/Dockerfile` with FastAPI, synthetic sample data, and a persistent
+  SQLite volume at `/data`.
+- `frontend/Dockerfile` with a Vite production build served by nginx.
+
+The browser talks to the backend at `http://localhost:8000`, so the backend CORS
+origin list includes `http://localhost:8080`.
+
 ## Backend
 
 Install and start FastAPI:
@@ -23,6 +61,7 @@ Required environment:
 ```env
 FINANCE_DB_PATH=/data/finance.sqlite3
 FRONTEND_ORIGIN=https://your-frontend.example.com
+DEMO_MODE=false
 ```
 
 `FRONTEND_ORIGIN` can contain multiple comma-separated origins:
@@ -44,6 +83,16 @@ history when the service restarts.
 
 Use `/health` as the service health check.
 
+Build the backend container from the repository root:
+
+```bash
+docker build -f backend/Dockerfile -t smart-finance-backend .
+docker run --rm -p 8000:8000 \
+  -e FRONTEND_ORIGIN=http://localhost:5173 \
+  -v smart-finance-data:/data \
+  smart-finance-backend
+```
+
 ## Frontend
 
 Build the static site with the deployed backend URL:
@@ -55,6 +104,14 @@ VITE_API_BASE_URL=https://your-backend.example.com npm run build
 ```
 
 Deploy the generated `frontend/dist` directory with any static host.
+
+Build the frontend container from the repository root:
+
+```bash
+docker build -f frontend/Dockerfile \
+  --build-arg VITE_API_BASE_URL=https://your-backend.example.com \
+  -t smart-finance-frontend .
+```
 
 For local development, copy `frontend/.env.example` to `frontend/.env.local` and
 adjust `VITE_API_BASE_URL` if your backend is not running on

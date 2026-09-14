@@ -47,6 +47,9 @@ const DEFAULT_QUESTION = "How much did I spend on food in 2026-07?";
 const AI_CATEGORY_WARNING_TEXT = (
   "AI Assist sends transaction descriptions, cleaned merchant names, dates, amounts, current categories, local suggestions, local reasons, and account labels to OpenAI for category suggestions. It can update unsaved preview categories, but it never imports data or changes existing transactions automatically."
 );
+const DEMO_MODE_FALLBACK_MESSAGE = (
+  "Demo mode uses synthetic sample data. Uploads, imports, exports, resets, AI Assist, and saved changes are disabled."
+);
 
 function statusMessageTone(message, busy) {
   if (!message) {
@@ -62,6 +65,7 @@ function statusMessageTone(message, busy) {
     "choose",
     "cannot",
     "could not",
+    "disabled",
     "enter",
     "error",
     "failed",
@@ -69,6 +73,7 @@ function statusMessageTone(message, busy) {
     "must",
     "not found",
     "only expense",
+    "read-only",
     "required",
     "type ",
   ].some((term) => normalized.includes(term))) {
@@ -110,6 +115,7 @@ function healthStatusClass(health) {
 
 export default function App() {
   const [health, setHealth] = useState("Checking");
+  const [runtimeConfig, setRuntimeConfig] = useState({ demo_mode: false, demo_mode_message: null });
   const [summary, setSummary] = useState(emptySummary());
   const [insights, setInsights] = useState(emptyInsights());
   const [comparison, setComparison] = useState(emptyMonthlyComparison());
@@ -177,6 +183,7 @@ export default function App() {
   );
   const statusFeedbackTone = statusMessageTone(uploadStatus, busy);
   const isInitialDashboardLoad = dashboardLoading && !lastUpdated;
+  const demoMode = Boolean(runtimeConfig.demo_mode);
 
   const refreshDashboard = useCallback(async () => {
     setDashboardLoading(true);
@@ -184,6 +191,9 @@ export default function App() {
     try {
       const healthPayload = await request("/health");
       setHealth(healthPayload.status === "ok" ? "Online" : "Offline");
+
+      const runtimeConfigPayload = await request("/runtime-config");
+      setRuntimeConfig(runtimeConfigPayload);
 
       const monthsPayload = await request("/months");
       const activeMonth = month || monthsPayload[0]?.month || "";
@@ -1088,6 +1098,11 @@ export default function App() {
   }
 
   function handleExportTransactions() {
+    if (demoMode) {
+      setUploadStatus(runtimeConfig.demo_mode_message || DEMO_MODE_FALLBACK_MESSAGE);
+      return;
+    }
+
     const params = queryString({
       month,
       account: transactionFilters.account,
@@ -1100,11 +1115,21 @@ export default function App() {
   }
 
   function handleExportBackup() {
+    if (demoMode) {
+      setUploadStatus(runtimeConfig.demo_mode_message || DEMO_MODE_FALLBACK_MESSAGE);
+      return;
+    }
+
     setUploadStatus("Preparing backup download...");
     window.location.assign(`${API_BASE}/data/export`);
   }
 
   function handleJumpToImport() {
+    if (demoMode) {
+      setUploadStatus(runtimeConfig.demo_mode_message || DEMO_MODE_FALLBACK_MESSAGE);
+      return;
+    }
+
     importPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     importPanelRef.current?.querySelector('input[name="statement"]')?.focus();
   }
@@ -1160,6 +1185,16 @@ export default function App() {
         </div>
       )}
 
+      {demoMode && (
+        <div className="demo-mode-strip" role="status">
+          <Shield size={18} />
+          <div>
+            <strong>Demo mode</strong>
+            <p>{runtimeConfig.demo_mode_message || DEMO_MODE_FALLBACK_MESSAGE}</p>
+          </div>
+        </div>
+      )}
+
       {isInitialDashboardLoad ? (
         <>
           <section className="metrics-grid" aria-label="Finance metrics loading">
@@ -1186,7 +1221,7 @@ export default function App() {
               <Sparkles size={16} />
               Load Samples
             </button>
-            <button className="starter-secondary" type="button" disabled={busy} onClick={handleJumpToImport}>
+            <button className="starter-secondary" type="button" disabled={busy || demoMode} onClick={handleJumpToImport}>
               <FileUp size={16} />
               Import Statement
             </button>
@@ -1254,18 +1289,18 @@ export default function App() {
           <PanelTitle icon={<Target size={18} />} title="Budgets" detail={month || "No month"} />
           <BudgetForm
             categories={categoryOptions}
-            disabled={busy || !month || !categoryOptions.length}
+            disabled={busy || demoMode || !month || !categoryOptions.length}
             draft={budgetDraft}
             onDraftChange={setBudgetDraft}
             onSubmit={handleBudgetSubmit}
           />
-          <BudgetList budgets={budgets} busy={busy} onDelete={handleDeleteBudget} />
+          <BudgetList budgets={budgets} busy={busy || demoMode} onDelete={handleDeleteBudget} />
         </section>
 
         <section className="panel recommendations-panel">
           <PanelTitle icon={<Lightbulb size={18} />} title="Budget Recommendations" detail={month || "No month"} />
           <BudgetRecommendationList
-            busy={busy}
+            busy={busy || demoMode}
             onApply={handleApplyBudgetRecommendation}
             recommendations={budgetRecommendations}
           />
@@ -1275,7 +1310,7 @@ export default function App() {
           <PanelTitle icon={<Tags size={18} />} title="Category Review" detail={`${categoryReview.length} queued`} />
           <CategoryReviewList
             aiStatus={aiCategoryStatus}
-            busy={busy || updatingTransactionId !== null}
+            busy={busy || demoMode || updatingTransactionId !== null}
             ignored={ignoredCategoryReviews}
             items={categoryReview}
             onAskAI={handleAICategoryReview}
@@ -1288,7 +1323,7 @@ export default function App() {
         <section className="panel recurring-panel" data-testid="recurring-panel">
           <PanelTitle icon={<Repeat2 size={18} />} title="Recurring Charges" detail={`${recurringCharges.length} active`} />
           <RecurringList
-            busy={busy}
+            busy={busy || demoMode}
             charges={recurringCharges}
             ignored={ignoredRecurring}
             onIgnore={handleIgnoreRecurring}
@@ -1301,15 +1336,28 @@ export default function App() {
           <form className="upload-form" onSubmit={handleUpload}>
             <label className="form-field">
               <span>Statement file</span>
-              <input name="statement" type="file" accept=".csv,.pdf,text/csv,application/pdf" onChange={clearPreviewState} />
+              <input
+                name="statement"
+                type="file"
+                accept=".csv,.pdf,text/csv,application/pdf"
+                disabled={busy || demoMode}
+                onChange={clearPreviewState}
+              />
             </label>
             <label className="form-field">
               <span>Account label</span>
-              <input name="accountName" type="text" maxLength={80} placeholder="Checking, credit card, or bank name" onChange={clearPreviewState} />
+              <input
+                name="accountName"
+                type="text"
+                maxLength={80}
+                placeholder="Checking, credit card, or bank name"
+                disabled={busy || demoMode}
+                onChange={clearPreviewState}
+              />
             </label>
             <label className="form-field">
               <span>CSV mapping preset</span>
-              <select name="csvPresetId" onChange={clearPreviewState}>
+              <select name="csvPresetId" disabled={busy || demoMode} onChange={clearPreviewState}>
                 <option value="">Auto mapping</option>
                 {csvPresets.map((preset) => (
                   <option key={preset.id} value={preset.id}>{preset.name}</option>
@@ -1317,14 +1365,14 @@ export default function App() {
               </select>
             </label>
             <div className="button-row">
-              <button className="ghost-button" type="button" disabled={busy} onClick={handlePreviewUpload}>
+              <button className="ghost-button" type="button" disabled={busy || demoMode} onClick={handlePreviewUpload}>
                 <Eye size={16} />
                 Preview
               </button>
-              <button type="submit" disabled={busy || (uploadPreview && !uploadPreview.rows?.length)}>
+              <button type="submit" disabled={busy || demoMode || (uploadPreview && !uploadPreview.rows?.length)}>
                 {uploadPreview?.rows?.length ? "Import Reviewed" : "Import"}
               </button>
-              <button className="ghost-button" type="button" disabled={busy} onClick={handleExportBackup}>
+              <button className="ghost-button" type="button" disabled={busy || demoMode} onClick={handleExportBackup}>
                 <Download size={16} />
                 Backup
               </button>
@@ -1332,14 +1380,14 @@ export default function App() {
                 <Sparkles size={16} />
                 Load Samples
               </button>
-              <button className="ghost-button danger-button" type="button" disabled={busy || !transactions.length} onClick={handleClear}>
+              <button className="ghost-button danger-button" type="button" disabled={busy || demoMode || !transactions.length} onClick={handleClear}>
                 <Trash2 size={16} />
                 Clear Txns
               </button>
             </div>
           </form>
           <CsvPresetForm
-            busy={busy}
+            busy={busy || demoMode}
             draft={csvPresetDraft}
             onDelete={handleDeleteCsvPreset}
             onDraftChange={setCsvPresetDraft}
@@ -1350,7 +1398,7 @@ export default function App() {
           {uploadPreview && (
             <ImportPreview
               aiStatus={aiCategoryStatus}
-              busy={busy}
+              busy={busy || demoMode}
               categoryOptions={categoryOptions}
               onAskAI={handleAIPreviewCategories}
               onCategoryChange={handlePreviewCategoryChange}
@@ -1383,12 +1431,13 @@ export default function App() {
               <span>Reset confirmation</span>
               <input
                 autoComplete="off"
+                disabled={busy || demoMode}
                 onChange={(event) => setResetConfirmation(event.target.value)}
                 placeholder="RESET"
                 value={resetConfirmation}
               />
             </label>
-            <button className="danger-action" type="submit" disabled={busy || !hasLocalData || resetConfirmation !== "RESET"}>
+            <button className="danger-action" type="submit" disabled={busy || demoMode || !hasLocalData || resetConfirmation !== "RESET"}>
               <Trash2 size={16} />
               Reset Data
             </button>
@@ -1396,18 +1445,19 @@ export default function App() {
           <form className="privacy-form restore-form" onSubmit={handleRestoreBackup}>
             <label className="form-field">
               <span>Backup file</span>
-              <input name="backup" type="file" accept=".json,application/json" />
+              <input name="backup" type="file" accept=".json,application/json" disabled={busy || demoMode} />
             </label>
             <label className="form-field">
               <span>Restore confirmation</span>
               <input
                 autoComplete="off"
+                disabled={busy || demoMode}
                 onChange={(event) => setRestoreConfirmation(event.target.value)}
                 placeholder="RESTORE"
                 value={restoreConfirmation}
               />
             </label>
-            <button type="submit" disabled={busy || restoreConfirmation !== "RESTORE"}>
+            <button type="submit" disabled={busy || demoMode || restoreConfirmation !== "RESTORE"}>
               <FileUp size={16} />
               Restore
             </button>
@@ -1436,12 +1486,12 @@ export default function App() {
           <PanelTitle icon={<BookmarkPlus size={18} />} title="Merchant Rules" detail={`${merchantRules.length} saved`} />
           <RuleForm
             categories={categoryOptions}
-            disabled={busy || !categoryOptions.length}
+            disabled={busy || demoMode || !categoryOptions.length}
             draft={ruleDraft}
             onDraftChange={setRuleDraft}
             onSubmit={handleRuleSubmit}
           />
-          <RuleList rules={merchantRules} busy={busy} onDelete={handleDeleteRule} />
+          <RuleList rules={merchantRules} busy={busy || demoMode} onDelete={handleDeleteRule} />
         </section>
 
         <section className="panel">
@@ -1453,7 +1503,7 @@ export default function App() {
           <PanelTitle icon={<AlertTriangle size={18} />} title="Anomalies" detail={`${anomalies.length} active`} />
           <AnomalyList
             anomalies={anomalies}
-            busy={busy}
+            busy={busy || demoMode}
             ignored={ignoredAnomalies}
             onIgnore={handleIgnoreAnomaly}
             onRestore={handleRestoreAnomalyIgnore}
@@ -1476,6 +1526,7 @@ export default function App() {
           onExport={handleExportTransactions}
           onAdd={handleOpenTransactionCreator}
           busy={busy}
+          demoMode={demoMode}
           total={transactions.length}
         />
         <div className="transaction-table">
@@ -1495,7 +1546,7 @@ export default function App() {
               onEdit={handleOpenTransactionEditor}
               onCategoryChange={handleCategoryChange}
               transaction={transaction}
-              updating={updatingTransactionId === transaction.id}
+              updating={demoMode || updatingTransactionId === transaction.id}
             />
           ))}
         </div>
@@ -1517,7 +1568,7 @@ export default function App() {
         <TransactionEditModal
           categoryOptions={categoryOptions}
           draft={editDraft}
-          busy={busy}
+          busy={busy || demoMode}
           mode={creatingTransaction ? "create" : "edit"}
           onClearSplits={handleClearTransactionSplits}
           onClose={handleCloseTransactionEditor}
@@ -2500,7 +2551,7 @@ function formatHistoryMeta(item) {
   return item.month ? `${intent} - ${item.month}` : intent;
 }
 
-function TransactionFilters({ accounts, busy, categoryOptions, filters, onAdd, onChange, onClear, onExport, total }) {
+function TransactionFilters({ accounts, busy, categoryOptions, demoMode, filters, onAdd, onChange, onClear, onExport, total }) {
   return (
     <div className="transaction-toolbar">
       <label className="transaction-filter">
@@ -2543,14 +2594,14 @@ function TransactionFilters({ accounts, busy, categoryOptions, filters, onAdd, o
       </button>
       <button
         className="add-transaction-button"
-        disabled={busy || !categoryOptions.length}
+        disabled={busy || demoMode || !categoryOptions.length}
         onClick={onAdd}
         type="button"
       >
         <Plus size={16} />
         Add
       </button>
-      <button className="ghost-button export-button" disabled={!total} onClick={onExport} type="button">
+      <button className="ghost-button export-button" disabled={demoMode || !total} onClick={onExport} type="button">
         <Download size={16} />
         Export CSV
       </button>
